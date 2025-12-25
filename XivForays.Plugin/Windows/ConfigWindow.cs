@@ -4,7 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using XivMate.DataGathering.Forays.Dalamud.Windows.Tabs;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Windows;

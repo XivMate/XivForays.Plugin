@@ -253,7 +253,7 @@ public class EnemyTrackingService : IDisposable // Add IDisposable
                 // Create new record
                 var newEnemy = new EnemyPosition
                 {
-                    MobIngameId = battleNpc.DataId,
+                    MobIngameId = battleNpc.BaseId,
                     MobName = battleNpc.Name.ToString(),
                     Level = (byte)GetLevel(battleNpc).GetValueOrDefault(0),
                     X = battleNpc.Position.X,
@@ -322,8 +322,6 @@ public class EnemyTrackingService : IDisposable // Add IDisposable
             _enemies.Clear();
             _inCombatHistory.Clear();
         }
-
-        // Dispose unmanaged resources here if any
 
         _disposed = true;
     }

@@ -1,5 +1,5 @@
 using System.Linq;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using XivMate.DataGathering.Forays.Dalamud.Gathering.Enemy;
 using XivMate.DataGathering.Forays.Dalamud.Gathering.Fate;
 
@@ -36,6 +36,6 @@ public class GeneralTab(
         }
 
         var fateCount = fateModule.ActiveFates.Count();
-        ImGui.Text($"Fates on map: {fateCount}##fatecount");
+        ImGui.TextUnformatted($"Fates on map: {fateCount}##fatecount");
     }
 }

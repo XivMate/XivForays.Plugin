@@ -1,5 +1,5 @@
 using Dalamud.Plugin.Services;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using XivMate.DataGathering.Forays.Dalamud.Extensions;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Windows.Tabs;

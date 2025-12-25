@@ -2,7 +2,7 @@
 using System.Numerics;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Windows;
 
@@ -34,7 +34,7 @@ public class ApiKeyWindow : Window, IDisposable
             log.Debug($"CanCrowdsourceData updated to {canCrowdSourceData}");
         }
 
-        if (ImGui.InputText("Api Key##ApiKey", ref key, 36))
+        if (ImGui.InputText("Api Key##ApiKey", ref key))
         {
             key = key.Trim();
             log.Debug($"ApiKey updated to {key}");

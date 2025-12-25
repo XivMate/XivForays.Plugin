@@ -8,8 +8,8 @@ using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel.Sheets;
 using Newtonsoft.Json;
 using XivMate.DataGathering.Forays.Dalamud.Services;
@@ -177,24 +177,26 @@ public class RandomTestingModule(
 
     private unsafe FateCompletionData? ProcessFateRewardAddon()
     {
-        var addon = (AddonFateReward*)gameGui.GetAddonByName("FateReward");
-        if (addon == null)
+        var addonPtr = gameGui.GetAddonByName("FateReward");
+        if (addonPtr.IsNull)
         {
-            addon = (AddonFateReward*)gameGui.GetAddonByName("FateReward", 0);
+            addonPtr = gameGui.GetAddonByName("FateReward", 0);
         }
 
-        if (addon == null)
+        if (addonPtr.IsNull)
         {
             log.Info("[ProcessFateReward] Addon is null");
             return null;
         }
 
-        var unitBase = addon->AtkUnitBase;
-        if (!unitBase.IsVisible)
+        var atkPtr = (AtkUnitBase*)addonPtr.Address;
+        if (!atkPtr->IsVisible)
         {
             log.Info("[ProcessFateReward] UnitBase is not visible");
             return null;
         }
+
+        var addon = (AddonFateReward*)addonPtr.Address;
 
         // Extract data from the addon
         var completion = new FateCompletionData
@@ -203,8 +205,6 @@ public class RandomTestingModule(
             CompletionTime = DateTime.UtcNow
         };
 
-        // TODO: Extract actual data from addon structure
-        // This would require understanding the specific AtkUnitBase structure for FateReward
         log.Info($"[ProcessFateReward] UnitBase is visible - extracting data...");
 
         return completion;

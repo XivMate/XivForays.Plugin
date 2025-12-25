@@ -2,11 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Interface.Utility.Raii;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using XivMate.DataGathering.Forays.Dalamud.Gathering.Fate;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using XivMate.DataGathering.Forays.Dalamud.Models;
 using XivMate.DataGathering.Forays.Dalamud.Services;
 
@@ -32,7 +33,7 @@ public class DebugTab(
     /// <inheritdoc />
     public void Draw(Configuration.Configuration configuration)
     {
-        ImGui.Text("Show Debug Info");
+        ImGui.TextUnformatted("Show Debug Info");
         ImGui.SameLine();
 
         if (ImGui.Checkbox("##CrowdsourceData", ref Debug)) { }
@@ -43,10 +44,10 @@ public class DebugTab(
 
             RenderTest();
 
-            ImGui.Text($"Fates on map {fateModule.ActiveFates.Count()}");
+            ImGui.TextUnformatted($"Fates on map {fateModule.ActiveFates.Count()}");
             RenderFateTable();
 
-            ImGui.Text($"Enemies on map {enemies.Count}");
+            ImGui.TextUnformatted($"Enemies on map {enemies.Count}");
             RenderEnemiesTable(enemies);
         }
     }
@@ -76,43 +77,43 @@ public class DebugTab(
                 ImGui.TableNextRow();
                 // Column 0: ID
                 ImGui.TableNextColumn();
-                ImGui.Text(fate.FateId.ToString());
+                ImGui.TextUnformatted(fate.FateId.ToString());
                 // Column 1: Type ID
                 ImGui.TableNextColumn();
-                ImGui.Text(fate.LevelId.ToString());
+                ImGui.TextUnformatted(fate.LevelId.ToString());
 
                 // Column 4: X
                 ImGui.TableNextColumn();
-                ImGui.Text(fate.X.ToString("F1"));
+                ImGui.TextUnformatted(fate.X.ToString("F1"));
 
                 // Column 5: Y
                 ImGui.TableNextColumn();
-                ImGui.Text(fate.Y.ToString("F1"));
+                ImGui.TextUnformatted(fate.Y.ToString("F1"));
 
                 // Column 6: Z
                 ImGui.TableNextColumn();
-                ImGui.Text(fate.Z.ToString("F1"));
+                ImGui.TextUnformatted(fate.Z.ToString("F1"));
 
                 // Column 7: Adapted
                 ImGui.TableNextColumn();
-                ImGui.Text(fate.Radius+"");
+                ImGui.TextUnformatted(fate.Radius+"");
 
                 // Column 8: Mutated
                 ImGui.TableNextColumn();
-                ImGui.Text(fate.EndedAt.ToString());
+                ImGui.TextUnformatted(fate.EndedAt.ToString());
 
                 // Column 12: Territory ID
                 ImGui.TableNextColumn();
-                ImGui.Text(fate.TerritoryId.ToString());
+                ImGui.TextUnformatted(fate.TerritoryId.ToString());
 
                 // Column 13: Map ID
                 ImGui.TableNextColumn();
-                ImGui.Text(fate.MapId.ToString());
+                ImGui.TextUnformatted(fate.MapId.ToString());
 
                 // // Column 14: Timestamp
                 // ImGui.TableNextColumn();
                 // var dateTime = DateTimeOffset.FromUnixTimeSeconds(fate.TimeStamp).DateTime;
-                // ImGui.Text(dateTime.ToString("HH:mm:ss"));
+                // ImGui.TextUnformatted(dateTime.ToString("HH:mm:ss"));
             }
         }
     }
@@ -122,28 +123,27 @@ public class DebugTab(
         unsafe
         {
             //Get Addon
-            var addon = (AddonFateReward*)gameGui.GetAddonByName("FateReward", 1);
-            if (addon == null)
+            var addonPtr = gameGui.GetAddonByName("FateReward", 1);
+            if (addonPtr.IsNull)
             {
-                ImGui.Text("Addon is null");
+                ImGui.TextUnformatted("Addon is null");
                 return;
             }
 
-            //Get Fate
-            var unitBase = addon->AtkUnitBase;
-            if (!unitBase.IsVisible)
+            var unitBase = (AtkUnitBase*)addonPtr.Address;
+            if (!unitBase->IsVisible)
             {
-                ImGui.Text("UnitBase is not visible");
+                ImGui.TextUnformatted("UnitBase is not visible");
                 return;
             }
 
-            ImGui.Text(
-                $"UnitBase is visible - Atk values: {unitBase.AtkValues->ToString()}, NameString: {unitBase.NameString}");
-            var exp = addon->AtkValues[8].String.ExtractText();
-            ImGui.Text($"Exp: {exp}");
+            var addon = (AddonFateReward*)addonPtr.Address;
 
-            log.Debug($"Fate Window: {unitBase.AtkValues->ToString()}");
-            log.Debug($"Fate Window: {unitBase.NameString}");
+            ImGui.TextUnformatted($"UnitBase is visible");
+            var exp = addon->AtkValues[8].String;
+            ImGui.TextUnformatted($"Exp: {exp}");
+
+            log.Debug($"Fate Window visible");
         }
     }
 
@@ -179,63 +179,63 @@ public class DebugTab(
                 ImGui.TableNextRow();
                 // Column 0: ID
                 ImGui.TableNextColumn();
-                ImGui.Text(enemyPair.Key.ToString());
+                ImGui.TextUnformatted(enemyPair.Key.ToString());
                 // Column 1: Type ID
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.MobIngameId.ToString());
+                ImGui.TextUnformatted(enemy.MobIngameId.ToString());
 
                 // Column 2: Name
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.MobName ?? string.Empty);
+                ImGui.TextUnformatted(enemy.MobName ?? string.Empty);
 
                 // Column 3: Level
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.Level.ToString());
+                ImGui.TextUnformatted(enemy.Level.ToString());
 
                 // Column 4: X
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.X.ToString("F1"));
+                ImGui.TextUnformatted(enemy.X.ToString("F1"));
 
                 // Column 5: Y
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.Y.ToString("F1"));
+                ImGui.TextUnformatted(enemy.Y.ToString("F1"));
 
                 // Column 6: Z
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.Z.ToString("F1"));
+                ImGui.TextUnformatted(enemy.Z.ToString("F1"));
 
                 // Column 7: Adapted
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.IsAdapted ? "Yes" : "No");
+                ImGui.TextUnformatted(enemy.IsAdapted ? "Yes" : "No");
 
                 // Column 8: Mutated
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.IsMutated ? "Yes" : "No");
+                ImGui.TextUnformatted(enemy.IsMutated ? "Yes" : "No");
 
                 // Column 9: Element
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.Element ?? string.Empty);
+                ImGui.TextUnformatted(enemy.Element ?? string.Empty);
 
                 // Column 10: In Combat
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.IsInCombat ? "Yes" : "No");
+                ImGui.TextUnformatted(enemy.IsInCombat ? "Yes" : "No");
 
                 // Column 11: Has Been In Combat
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.HasBeenInCombat ? "Yes" : "No");
+                ImGui.TextUnformatted(enemy.HasBeenInCombat ? "Yes" : "No");
 
                 // Column 12: Territory ID
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.TerritoryId.ToString());
+                ImGui.TextUnformatted(enemy.TerritoryId.ToString());
 
                 // Column 13: Map ID
                 ImGui.TableNextColumn();
-                ImGui.Text(enemy.MapId.ToString());
+                ImGui.TextUnformatted(enemy.MapId.ToString());
 
                 // Column 14: Timestamp
                 ImGui.TableNextColumn();
                 var dateTime = DateTimeOffset.FromUnixTimeSeconds(enemy.TimeStamp).DateTime;
-                ImGui.Text(dateTime.ToString("HH:mm:ss"));
+                ImGui.TextUnformatted(dateTime.ToString("HH:mm:ss"));
             }
         }
     }

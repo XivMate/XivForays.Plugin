@@ -1,6 +1,5 @@
 using System.Text;
-using ImGuiNET;
-
+using Dalamud.Bindings.ImGui;
 namespace XivMate.DataGathering.Forays.Dalamud.Extensions;
 
 /// <summary>
@@ -29,12 +28,12 @@ public static class ImGuiHelper
 
         // Display label with proper width
         ImGui.PushItemWidth(ImGui.CalcTextSize(label).X + ImGui.GetStyle().ItemInnerSpacing.X);
-        ImGui.Text(label);
+        ImGui.TextUnformatted(label);
         ImGui.PopItemWidth();
         ImGui.SameLine();
 
         // Display input field and handle changes
-        if (ImGui.InputText($"##{label}", inputTextBuffer, bufferSize))
+        if (ImGui.InputText($"##{label}", inputTextBuffer))
         {
             text = Encoding.UTF8.GetString(inputTextBuffer).TrimEnd('\0'); // Remove trailing null chars
             return true;
