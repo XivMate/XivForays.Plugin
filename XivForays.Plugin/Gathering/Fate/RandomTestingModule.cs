@@ -78,7 +78,7 @@ public class RandomTestingModule(
     {
         schedulerService.Dispose();
         territoryService.Dispose();
-        chatGui.CheckMessageHandled -= OnHandleMessage;
+        chatGui.ChatMessage -= OnHandleMessage;
         gameInventory.InventoryChanged -= OnGameInventoryOnInventoryChanged;
     }
 
@@ -86,7 +86,8 @@ public class RandomTestingModule(
 
     public void LoadConfig(Configuration.Configuration configuration)
     {
-        chatGui.CheckMessageHandled += OnHandleMessage;
+        // ChatMessage is the first chat pass in API 15.
+        chatGui.ChatMessage += OnHandleMessage;
         gameInventory.InventoryChanged += OnGameInventoryOnInventoryChanged;
     }
 
