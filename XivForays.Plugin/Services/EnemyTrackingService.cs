@@ -48,7 +48,7 @@ public class EnemyTrackingService : IDisposable // Add IDisposable
     /// <summary>
     /// Handles territory changes and generates a new instance GUID when entering a new territory
     /// </summary>
-    private void OnTerritoryChanged(ushort territoryId)
+    private void OnTerritoryChanged(uint territoryId)
     {
         if (!clientState.IsLoggedIn)
         {
@@ -77,7 +77,7 @@ public class EnemyTrackingService : IDisposable // Add IDisposable
     /// Checks if the current territory is a recordable foray territory
     /// </summary>
     public bool IsInRecordableTerritory() => forayService.IsInRecordableTerritory() && clientState.IsLoggedIn &&
-                                             clientState.LocalPlayer != null;
+                                             objectTable.LocalPlayer != null;
 
     /// <summary>
     /// Gets the current territory ID
@@ -179,7 +179,7 @@ public class EnemyTrackingService : IDisposable // Add IDisposable
             if (obj is not IBattleNpc battleNpc) continue;
 
             // Only interested in enemies (not friendly NPCs or players)
-            if (battleNpc.BattleNpcKind != BattleNpcSubKind.Enemy) continue;
+            if (battleNpc.BattleNpcKind != BattleNpcSubKind.Combatant) continue;
 
             // Skip if already dead
             if (battleNpc.CurrentHp <= 0) continue;

@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Fates;
 using Dalamud.Game.Inventory;
 using Dalamud.Game.Inventory.InventoryEventArgTypes;
-using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Plugin.Services;
@@ -125,8 +125,9 @@ public class RandomTestingModule(
         }
     }
 
-    private void OnHandleMessage(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool ishandled)
+    private void OnHandleMessage(IHandleableChatMessage chat)
     {
+        var message = chat.Message;
         if (message.TextValue.Contains("EXP chain") ||
             message.TextValue.Contains("You obtain") ||
             message.TextValue.Contains("You were unable to obtain") ||
@@ -137,7 +138,7 @@ public class RandomTestingModule(
             var now = DateTime.UtcNow;
             log.Info($"----------------------------------------");
             log.Info("OnHandleMessage");
-            log.Information($"Type: {type}, sender: {sender.TextValue}, Message: {message.TextValue}, is handled: {ishandled}, timestamp: {timestamp}");
+            log.Information($"Type: {chat.LogKind}, sender: {chat.Sender.TextValue}, Message: {message.TextValue}, is handled: {chat.IsHandled}, timestamp: {chat.Timestamp}");
 
             // Add to pending completion
             var pending = GetOrCreatePendingCompletion(now);

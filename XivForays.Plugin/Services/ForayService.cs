@@ -41,9 +41,9 @@ public class ForayService : IDisposable
                forayNames.Any(p => territoryType?.PlaceName.Value.Name.ExtractText().Contains(p) ?? false);
     }
 
-    private void OnTerritoryChanged(ushort obj)
+    private void OnTerritoryChanged(uint territoryId)
     {
-        lastTerritory = territoryService.GetTerritoryForId(obj);
+        lastTerritory = territoryService.GetTerritoryForId(territoryId);
     }
 
     public void Dispose()

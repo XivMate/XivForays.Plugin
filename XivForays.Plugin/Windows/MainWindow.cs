@@ -50,7 +50,7 @@ public class MainWindow : Window, IDisposable
             if (child.Success)
             {
 
-                var localPlayer = Plugin.ClientState.LocalPlayer;
+                var localPlayer = Plugin.ObjectTable.LocalPlayer;
                 if (localPlayer == null)
                 {
                     ImGui.TextUnformatted("Our local player is currently not loaded.");

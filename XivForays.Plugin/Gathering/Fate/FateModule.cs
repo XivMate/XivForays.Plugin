@@ -13,6 +13,7 @@ namespace XivMate.DataGathering.Forays.Dalamud.Gathering.Fate;
 
 public class FateModule(
     IClientState clientState,
+    IObjectTable objectTable,
     IFateTable fateTable,
     IFramework framework,
     SchedulerService schedulerService,
@@ -59,7 +60,7 @@ public class FateModule(
     /// <summary>
     /// Handles territory changes and determines if the current territory is recordable
     /// </summary>
-    private void OnTerritoryChanged(ushort territoryId)
+    private void OnTerritoryChanged(uint territoryId)
     {
         if (!clientState.IsLoggedIn)
         {
@@ -95,7 +96,7 @@ public class FateModule(
     /// </summary>
     private void FateTick()
     {
-        if (clientState.LocalPlayer == null || !isInRecordableTerritory)
+        if (objectTable.LocalPlayer == null || !isInRecordableTerritory)
         {
             return;
         }

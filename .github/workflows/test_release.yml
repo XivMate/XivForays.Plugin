@@ -15,7 +15,7 @@ jobs:
             - name: Setup .NET
               uses: actions/setup-dotnet@v1
               with:
-                  dotnet-version: '9.x.x'
+                  dotnet-version: '10.0.x'
             - name: Restore dependencies
               run: dotnet restore
             - name: Download Dalamud
@@ -84,6 +84,8 @@ jobs:
                   $path = './repo.json'
                   $json = Get-Content -Raw $path | ConvertFrom-Json
                   $json[0].TestingAssemblyVersion = $ver
+                  $manifest = Get-Content -Raw ./XivForays.Plugin/bin/x64/Debug/XivForays.Plugin.json | ConvertFrom-Json
+                  $json[0].TestingDalamudApiLevel = $manifest.DalamudApiLevel
                   $json[0].DownloadLinkTesting = $json.DownloadLinkTesting -replace '[^/]+/XivForays.Plugin.zip',"$verT/XivForays.Plugin.zip"
                   $content = $json | ConvertTo-Json -AsArray
                   set-content -Path $path -Value $content
