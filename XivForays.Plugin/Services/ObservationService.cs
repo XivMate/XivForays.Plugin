@@ -4,6 +4,7 @@ using System.Threading;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
+using XivMate.DataGathering.Forays.Dalamud.Core;
 using XivMate.DataGathering.Forays.Dalamud.Gathering;
 using XivMate.DataGathering.Forays.Dalamud.Models;
 
@@ -16,13 +17,13 @@ internal sealed class ObservationService(
     ApiService api,
     IPluginLog log) : IModule
 {
-    private const int MaxBatchSize = 256;
-    private const int MaxPending = 4096;
     private readonly object gate = new();
     private readonly Queue<Observation> pending = new();
+    private readonly UploadPolicy policy = new();
     private ObservationBatch? retryBatch;
     private int uploading;
     private volatile bool enabled;
+    private UploadOutcome? lastWarned;
 
     public bool Enabled => enabled;
 
@@ -42,7 +43,7 @@ internal sealed class ObservationService(
         }
 
         if (enabled)
-            scheduler.ScheduleOnNewThread(UploadObservations, 2000);
+            scheduler.ScheduleOnNewThread(UploadObservations, UploadPolicy.WorkerIntervalMs);
         else
             scheduler.CancelScheduledTask(UploadObservations);
     }
@@ -66,7 +67,7 @@ internal sealed class ObservationService(
         if (player == null)
             return result;
 
-        if (ForayService.IsEureka(territory))
+        if (ForayZones.IsEureka(territory))
         {
             var effective = player->GetContentValue(2);
             return result with
@@ -77,7 +78,7 @@ internal sealed class ObservationService(
             };
         }
 
-        if (ForayService.IsOccultCrescent(territory))
+        if (ForayZones.IsOccultCrescent(territory))
         {
             return result with
             {
@@ -98,7 +99,7 @@ internal sealed class ObservationService(
             if (!enabled)
                 return;
 
-            if (pending.Count == MaxPending)
+            if (pending.Count >= UploadPolicy.MaxPending)
                 pending.Dequeue();
             pending.Enqueue(observation);
         }
@@ -114,12 +115,13 @@ internal sealed class ObservationService(
             ObservationBatch batch;
             lock (gate)
             {
-                if (cancellationToken.IsCancellationRequested || !enabled || (retryBatch == null && pending.Count == 0))
+                if (cancellationToken.IsCancellationRequested || !enabled || (retryBatch == null && pending.Count == 0) ||
+                    !policy.CanAttempt(Environment.TickCount64))
                     return;
 
                 if (retryBatch == null)
                 {
-                    var observations = new Observation[Math.Min(MaxBatchSize, pending.Count)];
+                    var observations = new Observation[Math.Min(UploadPolicy.MaxBatchSize, pending.Count)];
                     for (var i = 0; i < observations.Length; i++)
                         observations[i] = pending.Dequeue();
                     retryBatch = new ObservationBatch(1, Guid.NewGuid(), observations);
@@ -131,15 +133,15 @@ internal sealed class ObservationService(
             if (!enabled)
                 return;
 
-            var accepted = api.UploadObservations(batch, cancellationToken).GetAwaiter().GetResult();
+            var outcome = api.UploadObservations(batch, cancellationToken).GetAwaiter().GetResult();
+            var keep = policy.Record(outcome, Environment.TickCount64);
             lock (gate)
             {
-                if (ReferenceEquals(retryBatch, batch))
+                if (!keep && ReferenceEquals(retryBatch, batch))
                     retryBatch = null;
             }
 
-            if (!accepted)
-                log.Warning("The server rejected or does not support versioned Foray observations.");
+            Report(outcome);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -153,6 +155,30 @@ internal sealed class ObservationService(
         {
             Volatile.Write(ref uploading, 0);
         }
+    }
+
+    // One line per change of state, never the key, URL or body.
+    private void Report(UploadOutcome outcome)
+    {
+        if (outcome == UploadOutcome.Accepted)
+        {
+            lastWarned = null;
+            return;
+        }
+
+        if (lastWarned == outcome)
+            return;
+
+        lastWarned = outcome;
+        log.Warning(outcome switch
+        {
+            UploadOutcome.EndpointMissing =>
+                "XivForays: observations endpoint returned 404; the web friends branch is not deployed. New data is being dropped.",
+            UploadOutcome.Unauthorized =>
+                "XivForays: the server refused the API key (401/403). Check the key in /xivforays config. Uploads paused.",
+            UploadOutcome.Drop => "XivForays: the server rejected an observation batch (HTTP 4xx); it was dropped.",
+            _ => "XivForays: observation upload failed (server error or timeout); retrying with backoff."
+        });
     }
 
     public void Dispose()

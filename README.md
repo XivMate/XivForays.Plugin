@@ -1,6 +1,6 @@
 # XivMate Foray Data Gathering
 
-An opt-in Dalamud plugin that contributes world observations from Eureka, Bozjan Southern Front, Zadnor and Occult Crescent to the XivForays bestiary project.
+An opt-in, passive Dalamud plugin that contributes world observations from Eureka, Bozjan Southern Front, Zadnor, Delubrum Reginae and the Occult Crescent to the XivForays bestiary project. After install and opt-in it needs no clicks.
 
 
 ## Install in Dalamud
@@ -12,30 +12,36 @@ An opt-in Dalamud plugin that contributes world observations from Eureka, Bozjan
    https://github.com/XivMate/XivForays/releases/latest/download/repo.json
    ```
 
-3. Open `/xlplugins`, find **XivMate Foray Data Gathering** and choose **Install**. Use a Dalamud build that supports API 15 for version 0.0.0.11.
+3. Open `/xlplugins`, find **XivMate Foray Data Gathering** and choose **Install**. Use a Dalamud build that supports API 15 for version 0.0.0.12.
 4. Get your own API key from Jake or the [Forays site](https://web.xivforays.com/). Enter it in the first-run window or under **System** in `/xivforays config`. Keep the default API URL `https://web.xivforays.com/api/forays/`. Enable **Crowdsource data** in **General** when you want to contribute.
 
 To update, open `/xlplugins` and install the available update. Keep the same repository URL. If you previously loaded a developer copy or used an older repository entry for this plugin, remove that entry before installing from the Friends feed.
 
 The URL becomes available once Jake publishes the first Friends release. Dalamud needs to be able to open it without signing in. [Custom repository documentation](https://dalamud.dev/plugin-publishing/custom-repositories/)
 
-## What we collect
+## Privacy: exactly what is sent
 
-Crowdsourcing starts off for a fresh install. With it enabled, the plugin sends the following while you are in a supported zone:
+Sharing is off on a fresh install. Nothing is read or sent outside these zones, by territory ID in any client language: Eureka Anemos/Pagos/Pyros/Hydatos incl. the Baldesion Arsenal, Bozjan Southern Front incl. Castrum Lacus Litore, Zadnor incl. the Dalriada, Delubrum Reginae (normal and Savage), and the Occult Crescent South/North Horn incl. the Forked Tower. Eureka Orthos is not included. Inside them, with **Crowdsource data** on, the plugin sends:
 
-- Nearby enemies' game IDs, game-defined names, positions, observed levels and elements, mutation/adaptation, combat state, and when enemies appear, move, die in view or leave view.
-- FATE game IDs and game-defined names, centre, radius, start and observation times, progress, state and observed end or disappearance. Occult Crescent Critical Encounters contribute their game IDs, timers, progress, states and available map marker positions.
-- Recognized coffers, bunnies, pots and carrots with game IDs, locations and any recognized grades.
-- Zone and map IDs, UTC timestamps, current weather, and your current and effective elemental or Knowledge Level where available. Eureka observations can also include whether your elemental level is synced.
-- Recognized English game notices contribute an item ID and quantity when available, a chain number, or a signal that you defeated an enemy. The notice text is discarded. The plugin records visible deaths, self-defeat signals and loot separately.
+| What | Fields |
+| --- | --- |
+| Every record | record kind, UTC time, a random visit ID (new on every zone entry), zone and map ID, weather ID; in Eureka your current/effective elemental level and sync flag, in the Occult Crescent your current/effective Knowledge Level |
+| Coverage heartbeat (every 30 s) | your own position (x, y, z). No name, job, world or character ID |
+| Enemies near you | game NPC ID, a random per-enemy track ID, position, levels, element, mutated/adapted, in-combat, model ID and scale; when they appear, die in view, leave view, change, move 15+ yalms, and every 30 s. The legacy snapshot (every 15 s) also carries the enemy's game-defined name |
+| FATEs | FATE ID, game-defined FATE name (legacy route), centre, radius, start time, progress, state |
+| Critical engagements (Bozja, Zadnor, Occult Crescent) | encounter ID, state, progress, start time, seconds left, marker position and radius |
+| Coffers, bunnies, pots, carrots | game object ID, kind, grade when known, position |
+| Your own loot, EXP chain and defeat notices (English client) | item ID and quantity, chain number, or "you defeated an enemy". Numbers only; the notice text is discarded |
 
-The plugin sends its version, random IDs for visits and enemy tracks, and the API key you enter to authenticate uploads. The key is saved locally in your Dalamud plugin configuration. The server can link uploads made with the same key. Legacy enemy and FATE records retain the existing key reference, and the new observation stream stores a one-way reference to it. The server receives your connection IP as part of normal web traffic.
+Every upload carries the plugin version and the API key you entered (to authenticate). The server stores the key with legacy enemy/FATE records and a SHA-256 of it with the newer records. The server also sees your IP address as part of normal web traffic.
 
-The plugin sends no chat text, chat sender names, character or player names, character or account IDs, player positions, party lists, inventory contents, passwords, screenshots, or files from your computer. It does not upload Dalamud or ACT logs. Enemy and event names come from the game. Turn off **Crowdsource data** in `/xivforays config` under **General** to stop collecting and clear pending uploads. A request already sent may still finish.
+**Never sent or logged:** chat text from any channel (say, party, FC, linkshell, tell, ...), chat sender names, player or character names, character/content/account IDs, other players' positions or data, party lists, inventory, retainers, screenshots, or files. The plugin only looks at the system loot/error channels for your own notices and keeps the numbers. It does not write chat, names, request bodies or your API key to `dalamud.log`; its log lines are short status messages (for example "observations endpoint returned 404").
 
-See the [capture specification](docs/CAPTURE_SPEC.md) for field names and limits.
+Turn off **Crowdsource data** in `/xivforays config` under **General** to stop collecting and clear pending uploads (a request already in flight may still finish). See the [capture specification](docs/CAPTURE_SPEC.md) for field names and limits.
 
 ## Build and release
+
+**Deploy order:** the web ingest `feature/friends-release` branch must be live before anyone installs 0.0.0.12. The deployed `master` returns 404 for `/observations` and the plugin drops those batches (it logs one warning saying so).
 
 Use .NET 10, stable Dalamud API 15 references and the `XivForays.Plugin.sln` solution.
 

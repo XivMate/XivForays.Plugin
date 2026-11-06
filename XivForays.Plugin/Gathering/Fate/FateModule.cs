@@ -6,6 +6,7 @@ using System.Numerics;
 using System.Threading;
 using Dalamud.Game.ClientState.Fates;
 using Dalamud.Plugin.Services;
+using XivMate.DataGathering.Forays.Dalamud.Core;
 using XivMate.DataGathering.Forays.Dalamud.Models;
 using XivMate.DataGathering.Forays.Dalamud.Services;
 
@@ -21,6 +22,8 @@ internal sealed class FateModule(
     ObservationService observations) : IModule
 {
     private readonly Dictionary<uint, TrackedFate> fates = new();
+    private const int MaxQueuedFates = 32;
+    private readonly UploadPolicy policy = new();
     private ConcurrentQueue<Models.Fate> queue = new();
     private Guid visitId;
     private volatile bool enabled;
@@ -36,7 +39,7 @@ internal sealed class FateModule(
         enabled = configuration.CanCrowdsourceData;
         if (enabled)
         {
-            scheduler.ScheduleOnFrameworkThread(FateTick, 500);
+            scheduler.ScheduleOnFrameworkThread(FateTick, StreamRates.FateScanMs);
             scheduler.ScheduleOnNewThread(FateUpload, 2500);
         }
         else
@@ -135,7 +138,7 @@ internal sealed class FateModule(
         fates.Remove(fate.Legacy.FateId);
         Record(fate, context, kind);
         fate.Legacy.EndedAt = context.ObservedAtMs / 1000;
-        if (queue.Count >= 32)
+        if (queue.Count >= MaxQueuedFates)
             queue.TryDequeue(out _);
         queue.Enqueue(fate.Legacy);
     }
@@ -157,12 +160,19 @@ internal sealed class FateModule(
     private void FateUpload(CancellationToken cancellationToken)
     {
         var pending = queue;
-        if (cancellationToken.IsCancellationRequested || !enabled || !pending.TryDequeue(out var fate))
+        if (cancellationToken.IsCancellationRequested || !enabled || !policy.CanAttempt(Environment.TickCount64) ||
+            !pending.TryDequeue(out var fate))
             return;
 
         try
         {
-            api.UploadFate(fate, cancellationToken).GetAwaiter().GetResult();
+            var outcome = api.UploadFate(fate, cancellationToken).GetAwaiter().GetResult();
+            var failuresBefore = policy.ConsecutiveFailures;
+            // Retry only transient failures (5xx/timeout), with backoff; 4xx records are dropped.
+            if (policy.Record(outcome, Environment.TickCount64) && enabled && pending.Count < MaxQueuedFates)
+                pending.Enqueue(fate);
+            if (outcome != UploadOutcome.Accepted && failuresBefore == 0)
+                log.Warning($"FATE completion upload failed ({outcome}).");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -170,8 +180,6 @@ internal sealed class FateModule(
         }
         catch (Exception ex)
         {
-            if (!cancellationToken.IsCancellationRequested && enabled && pending.Count < 32)
-                pending.Enqueue(fate);
             log.Warning($"FATE completion upload failed ({ex.GetType().Name}).");
         }
     }

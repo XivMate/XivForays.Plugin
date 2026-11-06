@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using Dalamud.Plugin.Services;
+using XivMate.DataGathering.Forays.Dalamud.Core;
 using XivMate.DataGathering.Forays.Dalamud.Models;
 using XivMate.DataGathering.Forays.Dalamud.Services;
 
@@ -15,8 +16,11 @@ internal sealed class EnemyLocationGatherer(
     IPluginLog log,
     ApiService api) : IModule
 {
+    private const int MaxQueuedSnapshots = 10;
+    private readonly UploadPolicy policy = new();
     private ConcurrentQueue<List<EnemyPosition>> queue = new();
     private long lastSnapshot;
+    private long lastPeriodicSample;
     private volatile bool enabled;
 
     public bool Enabled => enabled;
@@ -30,7 +34,8 @@ internal sealed class EnemyLocationGatherer(
         if (enabled)
         {
             lastSnapshot = 0;
-            scheduler.ScheduleOnFrameworkThread(EnemyTick, 500);
+            lastPeriodicSample = 0;
+            scheduler.ScheduleOnFrameworkThread(EnemyTick, StreamRates.EnemyScanMs);
             scheduler.ScheduleOnNewThread(EnemyUpload, 3000);
         }
         else
@@ -50,15 +55,18 @@ internal sealed class EnemyLocationGatherer(
         try
         {
             var now = Environment.TickCount64;
-            var snapshotDue = now - lastSnapshot >= 5000 || lastSnapshot == 0;
-            var snapshot = enemies.Sample(observations.GetContext(), snapshotDue, observations.Record);
+            var snapshotDue = now - lastSnapshot >= StreamRates.LegacySnapshotMs || lastSnapshot == 0;
+            var periodicDue = now - lastPeriodicSample >= StreamRates.EnemyPeriodicSampleMs || lastPeriodicSample == 0;
+            if (periodicDue)
+                lastPeriodicSample = now;
+            var snapshot = enemies.Sample(observations.GetContext(), snapshotDue, periodicDue, observations.Record);
             if (!snapshotDue)
                 return;
 
             lastSnapshot = now;
             if (snapshot.Count > 0)
             {
-                if (queue.Count >= 10)
+                if (queue.Count >= MaxQueuedSnapshots)
                     queue.TryDequeue(out _);
                 queue.Enqueue(snapshot);
             }
@@ -72,12 +80,19 @@ internal sealed class EnemyLocationGatherer(
     private void EnemyUpload(CancellationToken cancellationToken)
     {
         var pending = queue;
-        if (cancellationToken.IsCancellationRequested || !enabled || !pending.TryDequeue(out var snapshot))
+        if (cancellationToken.IsCancellationRequested || !enabled || !policy.CanAttempt(Environment.TickCount64) ||
+            !pending.TryDequeue(out var snapshot))
             return;
 
         try
         {
-            api.UploadEnemyPosition(snapshot, cancellationToken).GetAwaiter().GetResult();
+            var outcome = api.UploadEnemyPosition(snapshot, cancellationToken).GetAwaiter().GetResult();
+            var failuresBefore = policy.ConsecutiveFailures;
+            // Retry only transient failures (5xx/timeout), with backoff; 4xx batches are dropped.
+            if (policy.Record(outcome, Environment.TickCount64) && enabled && pending.Count < MaxQueuedSnapshots)
+                pending.Enqueue(snapshot);
+            if (outcome != UploadOutcome.Accepted && failuresBefore == 0)
+                log.Warning($"Enemy position upload failed ({outcome}).");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -85,8 +100,6 @@ internal sealed class EnemyLocationGatherer(
         }
         catch (Exception ex)
         {
-            if (!cancellationToken.IsCancellationRequested && enabled && pending.Count < 10)
-                pending.Enqueue(snapshot);
             log.Warning($"Enemy position upload failed ({ex.GetType().Name}).");
         }
     }

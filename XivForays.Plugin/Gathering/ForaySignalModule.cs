@@ -14,6 +14,7 @@ using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.InstanceContent;
 using Lumina.Excel.Sheets;
+using XivMate.DataGathering.Forays.Dalamud.Core;
 using XivMate.DataGathering.Forays.Dalamud.Models;
 using XivMate.DataGathering.Forays.Dalamud.Services;
 
@@ -32,6 +33,7 @@ internal sealed partial class ForaySignalModule(
     private Dictionary<ulong, (uint BaseId, Vector3 Position)> treasures = new();
     private Dictionary<ushort, Observation> encounters = new();
     private Guid visitId;
+    private long lastHeartbeat;
 
     public bool Enabled { get; private set; }
 
@@ -44,7 +46,7 @@ internal sealed partial class ForaySignalModule(
         if (Enabled)
         {
             chatGui.ChatMessage += OnGameNotice;
-            scheduler.ScheduleOnFrameworkThread(SignalTick, 1000);
+            scheduler.ScheduleOnFrameworkThread(SignalTick, StreamRates.SignalScanMs);
         }
         else
         {
@@ -52,6 +54,7 @@ internal sealed partial class ForaySignalModule(
             scheduler.CancelScheduledTask(SignalTick);
             treasures.Clear();
             encounters.Clear();
+            lastHeartbeat = 0;
         }
     }
 
@@ -111,7 +114,11 @@ internal sealed partial class ForaySignalModule(
 
     private void SignalTick()
     {
-        if (!Enabled || !forayService.IsInRecordableTerritory() || objects.LocalPlayer == null)
+        if (!Enabled || !forayService.IsInRecordableTerritory())
+            return;
+
+        var player = objects.LocalPlayer;
+        if (player == null)
             return;
 
         try
@@ -122,10 +129,19 @@ internal sealed partial class ForaySignalModule(
                 visitId = context.VisitId;
                 treasures.Clear();
                 encounters.Clear();
+                lastHeartbeat = 0;
+            }
+
+            // Coverage heartbeat: own position + context, grouped by VisitId (no name, no content ID).
+            var now = Environment.TickCount64;
+            if (Heartbeat.IsDue(now, lastHeartbeat))
+            {
+                lastHeartbeat = now;
+                observations.Record(Heartbeat.Create(context, player.Position));
             }
 
             SampleTreasure(context);
-            if (ForayService.IsOccultCrescent(context.TerritoryId))
+            if (ForayZones.HasCriticalEngagements(context.TerritoryId))
                 SampleEncounters(context);
         }
         catch (Exception ex)
@@ -222,7 +238,18 @@ internal sealed partial class ForaySignalModule(
 
     private unsafe void SampleEncounters(Observation context)
     {
-        var container = DynamicEventContainer.GetInstance();
+        // Bozja and Zadnor CEs live in the Bozja director's DynamicEventContainer; the Horns use the
+        // Occult Crescent director's. Same struct, so the sampling below is shared.
+        DynamicEventContainer* container = null;
+        if (ForayZones.IsBozja(context.TerritoryId))
+        {
+            var bozja = PublicContentBozja.GetInstance();
+            if (bozja != null)
+                container = &bozja->DynamicEventContainer;
+        }
+
+        if (container == null)
+            container = DynamicEventContainer.GetInstance();
         if (container == null)
             return;
 

@@ -18,7 +18,10 @@ internal enum ObservationKind
     Chain = 10,
     Treasure = 11,
     CriticalEncounter = 12,
-    SelfDefeat = 13
+    SelfDefeat = 13,
+
+    /// <summary>Coverage heartbeat (every 30 s while recording): own position, zone, map, weather and levels. Grouped by VisitId (and the API key server-side).</summary>
+    RecordingActive = 14
 }
 
 internal sealed record Observation
@@ -55,4 +58,10 @@ internal sealed record Observation
     public byte? TreasureKind { get; init; }
     public byte? TreasureGrade { get; init; }
     public uint? SecondsLeft { get; init; }
+
+    /// <summary>Enemy ModelChara row ID (Character.ModelContainer.ModelCharaId).</summary>
+    public int? ModelCharaId { get; init; }
+
+    /// <summary>Enemy object scale (GameObject.Scale).</summary>
+    public float? ModelScale { get; init; }
 }

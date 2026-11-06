@@ -1,46 +1,64 @@
 using System;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
+using Lumina.Excel.Sheets;
+using XivMate.DataGathering.Forays.Dalamud.Core;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Services;
 
+/// <summary>
+/// The zone gate. Territory IDs (any client language) from <see cref="ForayZones"/>; any map layer that
+/// belongs to the zone (Baldesion Arsenal, the Dalriada, Delubrum floors, Forked Tower ...) is accepted.
+/// Outside a gated territory every check is a single cached boolean, so no other work happens.
+/// </summary>
 public sealed class ForayService : IDisposable
 {
-    private readonly TerritoryService territoryService;
     private readonly IClientState clientState;
     private readonly ICondition condition;
+    private readonly IDataManager dataManager;
     private uint territoryId;
-    private uint expectedMapId;
+    private bool forayTerritory;
+    private uint cachedMapId = uint.MaxValue;
+    private bool cachedMapRecordable;
 
     public Guid VisitId { get; private set; } = Guid.NewGuid();
 
-    public ForayService(TerritoryService territoryService, IClientState clientState, ICondition condition)
+    public ForayService(IClientState clientState, ICondition condition, IDataManager dataManager)
     {
-        this.territoryService = territoryService;
         this.clientState = clientState;
         this.condition = condition;
+        this.dataManager = dataManager;
         OnTerritoryChanged(clientState.TerritoryType);
         clientState.TerritoryChanged += OnTerritoryChanged;
     }
 
-    internal static bool IsEureka(uint territory) => territory is 732 or 763 or 795 or 827;
-    internal static bool IsOccultCrescent(uint territory) => territory is 1252 or 1346;
+    internal static bool IsEureka(uint territory) => ForayZones.IsEureka(territory);
+    internal static bool IsOccultCrescent(uint territory) => ForayZones.IsOccultCrescent(territory);
 
     public bool IsInRecordableTerritory()
     {
-        if (!clientState.IsLoggedIn || territoryId != clientState.TerritoryType ||
+        if (!forayTerritory || !clientState.IsLoggedIn || territoryId != clientState.TerritoryType ||
             condition[ConditionFlag.BetweenAreas] || condition[ConditionFlag.BetweenAreas51])
             return false;
 
-        return expectedMapId != 0 && expectedMapId == clientState.MapId;
+        var mapId = clientState.MapId;
+        if (mapId != cachedMapId)
+        {
+            cachedMapId = mapId;
+            cachedMapRecordable = mapId != 0 &&
+                                  dataManager.GetExcelSheet<Map>().TryGetRow(mapId, out var map) &&
+                                  ForayZones.IsRecordable(territoryId, mapId, map.TerritoryType.RowId);
+        }
+
+        return cachedMapRecordable;
     }
 
     private void OnTerritoryChanged(uint territory)
     {
         territoryId = territory;
-        expectedMapId = IsEureka(territory) || IsOccultCrescent(territory) || territory is 920 or 975
-            ? territoryService.GetTerritoryForId(territory)?.Map.RowId ?? 0
-            : 0;
+        forayTerritory = ForayZones.IsForayTerritory(territory);
+        cachedMapId = uint.MaxValue;
+        cachedMapRecordable = false;
         VisitId = Guid.NewGuid();
     }
 
