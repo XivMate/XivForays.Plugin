@@ -5,238 +5,172 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Game.ClientState.Fates;
 using Dalamud.Plugin.Services;
-using Newtonsoft.Json;
-using XivMate.DataGathering.Forays.Dalamud.Extensions;
+using XivMate.DataGathering.Forays.Dalamud.Models;
 using XivMate.DataGathering.Forays.Dalamud.Services;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Gathering.Fate;
 
-public class FateModule(
-    IClientState clientState,
+internal sealed class FateModule(
     IObjectTable objectTable,
     IFateTable fateTable,
-    IFramework framework,
-    SchedulerService schedulerService,
-    TerritoryService territoryService,
+    SchedulerService scheduler,
     IPluginLog log,
-    ApiService apiService,
-    ForayService forayService)
-    : IModule
+    ApiService api,
+    ForayService forayService,
+    ObservationService observations) : IModule
 {
-    private bool isInRecordableTerritory;
-    private Guid instanceGuid = Guid.NewGuid();
-    private readonly Dictionary<uint, Models.Fate> fates = new();
-    private readonly ConcurrentQueue<Models.Fate> fateQueue = new();
+    private readonly Dictionary<uint, TrackedFate> fates = new();
+    private readonly ConcurrentQueue<Models.Fate> queue = new();
+    private Guid visitId;
+    private volatile bool enabled;
 
-    private bool enabled = false;
     public bool Enabled => enabled;
-    private bool _disposed = false; // Add this line
+    public IEnumerable<Models.Fate> ActiveFates => fates.Values.Select(fate => fate.Legacy).ToList();
 
-    public IEnumerable<Models.Fate> ActiveFates => fates.Values.ToList();
-
-    /// <summary>
-    /// Loads configuration and enables/disables the module accordingly
-    /// </summary>
     public void LoadConfig(Configuration.Configuration configuration)
     {
-        if (configuration.CanCrowdsourceData && !enabled)
-        {
-            clientState.TerritoryChanged += OnTerritoryChanged;
-            schedulerService.ScheduleOnFrameworkThread(FateTick, 500);
-            schedulerService.ScheduleOnNewThread(FateUpload, 2500);
-            OnTerritoryChanged(clientState.TerritoryType);
-            enabled = true;
-            fates.Clear();
-        }
-        else if (enabled && !configuration.CanCrowdsourceData)
-        {
-            clientState.TerritoryChanged -= OnTerritoryChanged;
-            schedulerService.CancelScheduledTask(FateTick);
-            schedulerService.CancelScheduledTask(FateUpload);
-            enabled = false;
-        }
-    }
-
-    /// <summary>
-    /// Handles territory changes and determines if the current territory is recordable
-    /// </summary>
-    private void OnTerritoryChanged(uint territoryId)
-    {
-        if (!clientState.IsLoggedIn)
-        {
+        if (configuration.CanCrowdsourceData == enabled)
             return;
-        }
 
-        var territory = territoryService.GetTerritoryForId(territoryId);
-        log.Debug($"Current territory id is: ", territoryId);
-        log.Debug("Territory Placename is : ", territory?.PlaceName.ValueNullable);
-        if (territory?.PlaceName.ValueNullable.HasValue ?? false)
+        enabled = configuration.CanCrowdsourceData;
+        if (enabled)
         {
-            string territoryName = territory.Value.PlaceName.Value.Name.ToString();
-            if (forayService.IsInRecordableTerritory())
-            {
-                log.Info($"Foray territory: {territoryName}");
-                instanceGuid = Guid.NewGuid();
-                isInRecordableTerritory = true;
-            }
-            else
-            {
-                log.Info($"Not Foray territory: {territoryName}");
-                isInRecordableTerritory = false;
-            }
+            scheduler.ScheduleOnFrameworkThread(FateTick, 500);
+            scheduler.ScheduleOnNewThread(FateUpload, 2500);
         }
         else
         {
-            isInRecordableTerritory = false;
+            scheduler.CancelScheduledTask(FateTick);
+            scheduler.CancelScheduledTask(FateUpload);
+            fates.Clear();
+            queue.Clear();
         }
     }
 
-    /// <summary>
-    /// Processes fate information on each tick
-    /// </summary>
     private void FateTick()
     {
-        if (objectTable.LocalPlayer == null || !isInRecordableTerritory)
-        {
+        if (!enabled)
             return;
+
+        if (visitId != forayService.VisitId)
+        {
+            fates.Clear();
+            visitId = forayService.VisitId;
         }
+
+        if (objectTable.LocalPlayer == null || !forayService.IsInRecordableTerritory())
+            return;
 
         try
         {
-            ProcessActiveFates();
-            RemoveNonExistentFates();
+            SampleFates(observations.GetContext());
         }
         catch (Exception ex)
         {
-            log.Error($"Error in FateTick: {ex.Message}");
+            log.Warning($"FATE sampling failed ({ex.GetType().Name}).");
         }
     }
 
-    /// <summary>
-    /// Processes active fates from the fate table
-    /// </summary>
-    private void ProcessActiveFates()
+    private void SampleFates(Observation context)
     {
+        var visible = new HashSet<uint>();
         foreach (var fate in fateTable)
         {
-            if (fates.TryGetValue(fate.FateId, out var modelFate))
-            {
-                if (fate.State is FateState.Ended or FateState.Failed)
-                {
-                    RemoveFate(modelFate);
-                }
-            }
-            else if (fate.State is FateState.Running && fate.StartTimeEpoch > 0 && fate.Position != Vector3.Zero)
-            {
-                // Add new fate
-                log.Info(
-                    $"New fate found: {fate.Name}, started at: {fate.StartTimeEpoch}, position: {fate.Position}, status: {fate.State}, territory: {fate.TerritoryType.Value.RowId}, map: {clientState.MapId}");
+            if (fate.TerritoryType.RowId != context.TerritoryId)
+                continue;
 
-                modelFate = new Models.Fate()
+            var id = fate.FateId;
+            visible.Add(id);
+            fates.TryGetValue(id, out var tracked);
+            if (tracked != null && fate.State is (FateState.Ended or FateState.Failed))
+            {
+                Finish(tracked with { State = fate.State, Progress = fate.Progress }, context, ObservationKind.FateEnded);
+                continue;
+            }
+
+            if (fate.State != FateState.Running || fate.StartTimeEpoch <= 0 || fate.Position == Vector3.Zero)
+                continue;
+
+            if (tracked != null && tracked.Legacy.StartedAt != fate.StartTimeEpoch)
+            {
+                Finish(tracked, context, ObservationKind.FateDisappeared);
+                tracked = null;
+            }
+
+            if (tracked == null)
+            {
+                var legacy = new Models.Fate
                 {
-                    Name = fate.Name.ToString(),
-                    FateId = fate.FateId,
+                    FateId = id,
+                    Name = fate.Name.TextValue,
                     X = fate.Position.X,
                     Y = fate.Position.Y,
                     Z = fate.Position.Z,
                     Radius = fate.Radius,
                     StartedAt = fate.StartTimeEpoch,
-                    InstanceId = instanceGuid,
-                    TerritoryId = Convert.ToInt32(fate.TerritoryType.Value.RowId),
-                    MapId = (int)clientState.MapId,
+                    InstanceId = context.VisitId,
+                    TerritoryId = (int)context.TerritoryId,
+                    MapId = (int)context.MapId,
                     LevelId = fate.Level
                 };
-
-                fates.Add(fate.FateId, modelFate);
+                var started = new TrackedFate(legacy, fate.State, fate.Progress, fate.Position, fate.Radius);
+                fates[id] = started;
+                Record(started, context, ObservationKind.FateStarted);
             }
-        }
-    }
-
-    /// <summary>
-    /// Removes fates that no longer exist in the fate table
-    /// </summary>
-    private void RemoveNonExistentFates()
-    {
-        var fatesToRemove = fates.Keys
-                                 .Where(fateId => fateTable.All(existingFate => existingFate.FateId != fateId))
-                                 .ToList();
-
-        foreach (var fateId in fatesToRemove)
-        {
-            if (fates.TryGetValue(fateId, out var removedFate))
+            else if (tracked.Progress != fate.Progress || tracked.Position != fate.Position || tracked.Radius != fate.Radius)
             {
-                RemoveFate(removedFate);
+                var updated = tracked with { Progress = fate.Progress, Position = fate.Position, Radius = fate.Radius };
+                fates[id] = updated;
+                Record(updated, context, ObservationKind.FateUpdated);
             }
         }
+
+        foreach (var id in fates.Keys.Where(id => !visible.Contains(id)).ToList())
+            Finish(fates[id], context, ObservationKind.FateDisappeared);
     }
 
-    /// <summary>
-    /// Removes a fate from tracking and adds it to the upload queue
-    /// </summary>
-    private void RemoveFate(Models.Fate modelFate)
+    private void Finish(TrackedFate fate, Observation context, ObservationKind kind)
     {
-        if (fates.Remove(modelFate.FateId))
-        {
-            modelFate.EndedAt = DateTime.UtcNow.ToUnixTime();
-
-            if (modelFate.TerritoryId == clientState.TerritoryType)
-            {
-                fateQueue.Enqueue(modelFate);
-            }
-
-            log.Info($"Fate ended: {modelFate.Name}, at: {modelFate.EndedAt}");
-            log.Info(
-                $"#1 - Fate ended territoryid {modelFate.TerritoryId}, client territory: {clientState.TerritoryType}, client map: {clientState.MapId}");
-            log.Info(JsonConvert.SerializeObject(modelFate));
-        }
+        fates.Remove(fate.Legacy.FateId);
+        Record(fate, context, kind);
+        fate.Legacy.EndedAt = context.ObservedAtMs / 1000;
+        if (queue.Count >= 32)
+            queue.TryDequeue(out _);
+        queue.Enqueue(fate.Legacy);
     }
 
-    /// <summary>
-    /// Uploads fates from the queue to the API
-    /// </summary>
+    private void Record(TrackedFate fate, Observation context, ObservationKind kind) =>
+        observations.Record(context with
+        {
+            Kind = kind,
+            GameId = fate.Legacy.FateId,
+            X = fate.Position.X,
+            Y = fate.Position.Y,
+            Z = fate.Position.Z,
+            Radius = fate.Radius,
+            StartedAt = fate.Legacy.StartedAt,
+            Progress = fate.Progress,
+            State = (byte)fate.State
+        });
+
     private void FateUpload()
     {
-        if (fateQueue.TryDequeue(out var fate))
-        {
-            try
-            {
-                apiService.UploadFate(fate).GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                fateQueue.Enqueue(fate);
-                log.Warning($"Error uploading {fate.Name}: {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Disposes resources used by the module
-    /// </summary>
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (_disposed)
+        if (!enabled || !queue.TryDequeue(out var fate))
             return;
 
-        if (disposing)
+        try
         {
-            // Unsubscribe from events and cancel tasks
-            clientState.TerritoryChanged -= OnTerritoryChanged;
-            schedulerService.CancelScheduledTask(FateTick);
-            schedulerService.CancelScheduledTask(FateUpload);
-            // Clear collections if they contain disposable items or to release memory
-            fates.Clear();
-            while (fateQueue.TryDequeue(out _)) { }
+            api.UploadFate(fate).GetAwaiter().GetResult();
         }
-
-        // Unmanaged resources would be disposed here if any
-
-        _disposed = true;
+        catch (Exception ex)
+        {
+            if (enabled && queue.Count < 32)
+                queue.Enqueue(fate);
+            log.Warning($"FATE completion upload failed ({ex.GetType().Name}).");
+        }
     }
+
+    public void Dispose() => LoadConfig(new Configuration.Configuration());
+
+    private sealed record TrackedFate(Models.Fate Legacy, FateState State, byte Progress, Vector3 Position, float Radius);
 }

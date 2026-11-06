@@ -1,328 +1,171 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
-using Dalamud.Game.ClientState.Objects;
+using Dalamud.Game;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
-using Newtonsoft.Json;
-using XivMate.DataGathering.Forays.Dalamud.Extensions;
+using Lumina.Excel.Sheets;
 using XivMate.DataGathering.Forays.Dalamud.Models;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Services;
 
-public class EnemyTrackingService : IDisposable // Add IDisposable
+public sealed class EnemyTrackingService(IObjectTable objectTable, IDataManager dataManager, ForayService forayService)
 {
-    private readonly IClientState clientState;
-    private readonly IObjectTable objectTable;
-    private readonly IPluginLog log;
-    private readonly TerritoryService territoryService;
-    private readonly ForayService forayService;
+    private readonly Lazy<HashSet<uint>> adaptationIds = new(() => FindStatuses(dataManager, "Adaptation", "Adaption"));
+    private readonly Lazy<HashSet<uint>> mutationIds = new(() => FindStatuses(dataManager, "Mutation"));
+    private Dictionary<ulong, TrackedEnemy> tracked = new();
+    private Guid visitId;
 
-    private Guid _instanceGuid = Guid.NewGuid();
+    public bool IsInRecordableTerritory() => forayService.IsInRecordableTerritory() && objectTable.LocalPlayer != null;
 
-    private readonly Dictionary<ulong, EnemyPosition> _enemies = new();
-    private bool _disposed = false; // Add this line
-
-    // Dictionary to track which NPC IDs have been observed in combat
-    private readonly Dictionary<ulong, bool> _inCombatHistory = new();
-
-    public EnemyTrackingService(
-        IClientState clientState,
-        IObjectTable objectTable,
-        IPluginLog log,
-        TerritoryService territoryService,
-        ForayService forayService)
+    public Dictionary<ulong, EnemyPosition> GetVisibleEnemies()
     {
-        this.clientState = clientState;
-        this.objectTable = objectTable;
-        this.log = log;
-        this.territoryService = territoryService;
-        this.forayService = forayService;
-
-        this.clientState.TerritoryChanged += OnTerritoryChanged;
-        OnTerritoryChanged(clientState.TerritoryType);
-    }
-
-    /// <summary>
-    /// Handles territory changes and generates a new instance GUID when entering a new territory
-    /// </summary>
-    private void OnTerritoryChanged(uint territoryId)
-    {
-        if (!clientState.IsLoggedIn)
-        {
-            return;
-        }
-
-        if (forayService.IsInRecordableTerritory())
-        {
-            var territory = territoryService.GetTerritoryForId(territoryId);
-            var territoryName = territory?.PlaceName.ValueNullable?.Name.ToString() ?? "Unknown";
-            _instanceGuid = Guid.NewGuid();
-            _inCombatHistory.Clear();
-            _enemies.Clear();
-
-            log.Info(
-                $"[ETS] Foray territory: {territoryName}, local guid: {_instanceGuid}, local territory {clientState.TerritoryType}, map {clientState.MapId}");
-        }
-    }
-
-    /// <summary>
-    /// Get the current instance GUID for territory tracking
-    /// </summary>
-    public Guid GetInstanceGuid() => _instanceGuid;
-
-    /// <summary>
-    /// Checks if the current territory is a recordable foray territory
-    /// </summary>
-    public bool IsInRecordableTerritory() => forayService.IsInRecordableTerritory() && clientState.IsLoggedIn &&
-                                             objectTable.LocalPlayer != null;
-
-    /// <summary>
-    /// Gets the current territory ID
-    /// </summary>
-    public int GetTerritoryId() => Convert.ToInt32(clientState.TerritoryType);
-
-    /// <summary>
-    /// Gets the current map ID
-    /// </summary>
-    public int GetMapId() => (int)clientState.MapId;
-
-    /// <summary>
-    /// Update the tracked enemies and return the current state
-    /// </summary>
-    public Dictionary<ulong, EnemyPosition> UpdateAndGetEnemies()
-    {
+        var positions = new Dictionary<ulong, EnemyPosition>();
         if (!IsInRecordableTerritory())
+            return positions;
+
+        foreach (var enemy in objectTable.OfType<IBattleNpc>())
         {
-            return new Dictionary<ulong, EnemyPosition>();
+            if (IsEnemy(enemy) && enemy.CurrentHp > 0)
+                positions[enemy.GameObjectId] = Read(enemy, Guid.Empty, 0, 0,
+                    DateTimeOffset.UtcNow.ToUnixTimeSeconds(), null).Position;
         }
 
-        try
+        return positions;
+    }
+
+    internal void Reset() => tracked.Clear();
+
+    internal List<EnemyPosition> Sample(Observation context, bool takeSnapshot, Action<Observation> record)
+    {
+        if (visitId != context.VisitId)
         {
-            ProcessActiveEnemies();
-            RemoveOutdatedEnemies();
-            return GetCurrentEnemies();
+            Reset();
+            visitId = context.VisitId;
         }
-        catch (Exception ex)
+
+        var next = new Dictionary<ulong, TrackedEnemy>();
+        var snapshot = new List<EnemyPosition>();
+        foreach (var enemy in objectTable.OfType<IBattleNpc>())
         {
-            log.Error($"Error in UpdateAndGetEnemies: {ex.Message}, {ex.StackTrace}");
-            log.Error(ex.InnerException?.Message);
-            log.Error(JsonConvert.SerializeObject(ex));
+            if (!IsEnemy(enemy))
+                continue;
 
-            return new Dictionary<ulong, EnemyPosition>();
-        }
-    }
+            var id = enemy.GameObjectId;
+            tracked.TryGetValue(id, out var previous);
+            if (enemy.CurrentHp == 0 && previous?.Position.MobIngameId != enemy.BaseId)
+                continue;
 
-    /// <summary>
-    /// Get a copy of the current enemy dictionary
-    /// </summary>
-    public Dictionary<ulong, EnemyPosition> GetCurrentEnemies()
-    {
-        return new Dictionary<ulong, EnemyPosition>(_enemies);
-    }
-
-    /// <summary>
-    /// Find combat-active enemies (those that have been in combat)
-    /// </summary>
-    public List<EnemyPosition> GetCombatActiveEnemies()
-    {
-        return _enemies.Values
-                       .Where(e => e.HasBeenInCombat)
-                       .ToList();
-    }
-
-    private int? GetLevel(IBattleChara battleChara)
-    {
-        try
-        {
-            unsafe
+            if (previous != null && previous.Position.MobIngameId != enemy.BaseId)
             {
-                var bChara = (BattleChara*)battleChara.Address;
-                return bChara->ForayInfo.Level;
-            }
-        }
-        catch (Exception e)
-        {
-            log.Error($"Error getting foray level: {e.Message}");
-            return battleChara.Level;
-        }
-    }
-
-    private int? GetElement(IBattleChara battleChara)
-    {
-        try
-        {
-            unsafe
-            {
-                var bChara = (BattleChara*)battleChara.Address;
-                return bChara->ForayInfo.Element;
-            }
-        }
-        catch (Exception e)
-        {
-            log.Error($"Error getting element: {e.Message}");
-            return -1;
-        }
-    }
-
-    /// <summary>
-    /// Processes active enemies from the object table
-    /// </summary>
-    private void ProcessActiveEnemies()
-    {
-        // Create a list to track currently found enemies
-
-        foreach (var obj in objectTable)
-        {
-            if (obj is not IBattleNpc battleNpc) continue;
-
-            // Only interested in enemies (not friendly NPCs or players)
-            if (battleNpc.BattleNpcKind != BattleNpcSubKind.Combatant) continue;
-
-            // Skip if already dead
-            if (battleNpc.CurrentHp <= 0) continue;
-
-            var npcId = battleNpc.GameObjectId;
-            // Check for adaptation and mutation status effects
-            bool isAdapted = false;
-            bool isMutated = false;
-            string elementType = "Unknown";
-            bool isInCombat = false;
-
-            // Check status effects and combat state
-            if (battleNpc is IBattleChara battleChara)
-            {
-                // Check if the NPC is in combat
-                isInCombat = battleChara.TargetObject != null || battleChara.CurrentHp < battleChara.MaxHp;
-
-                // Update combat history if the NPC is in combat
-                if (isInCombat && _inCombatHistory.TryAdd(npcId, true))
-                {
-                    log.Debug($"NPC {battleNpc.Name} (ID: {npcId}) observed in combat for the first time");
-                }
-
-                elementType = GetElement(battleChara).GetValueOrDefault(-1).ToString();
-
-                // Process status effects
-                if (battleChara.StatusList != null)
-                {
-                    unsafe
-                    {
-                        var status =
-                            battleChara.StatusList.FirstOrDefault(s =>
-                                                                      s.GameData.Value.Name.ToString() ==
-                                                                      "Adaptation" ||
-                                                                      s.GameData.Value.Name.ToString() == "Mutation");
-
-                        if (status != null)
-                        {
-                            if (status.GameData.Value.Name == "Adaption") // ID for Adaptation
-                            {
-                                isAdapted = true;
-                            }
-                            else if (status.GameData.Value.Name == "Mutation")
-                            {
-                                isMutated = true;
-                            }
-                        }
-                    }
-                }
+                record(ToObservation(previous, context, ObservationKind.EnemyDisappeared));
+                previous = null;
             }
 
-            // Check if this NPC has been in combat before
-            var hasBeenInCombat = _inCombatHistory.ContainsKey(npcId) && _inCombatHistory[npcId];
-            var now = DateTime.UtcNow.ToUnixTime();
-            // Update existing record or create new one
-            if (_enemies.TryGetValue(npcId, out var enemyPosition))
+            if (enemy.CurrentHp > 0 && previous is { IsDead: true })
             {
-                // Update position and status
-                enemyPosition.X = battleNpc.Position.X;
-                enemyPosition.Y = battleNpc.Position.Y;
-                enemyPosition.Z = battleNpc.Position.Z;
-                enemyPosition.IsAdapted = isAdapted;
-                enemyPosition.IsMutated = isMutated;
-                enemyPosition.IsInCombat = isInCombat;
-                enemyPosition.HasBeenInCombat = hasBeenInCombat;
-                enemyPosition.TimeStamp = now;
-                enemyPosition.Element = elementType;
+                record(ToObservation(previous, context, ObservationKind.EnemyDisappeared));
+                previous = null;
             }
-            else
-            {
-                // Create new record
-                var newEnemy = new EnemyPosition
-                {
-                    MobIngameId = battleNpc.BaseId,
-                    MobName = battleNpc.Name.ToString(),
-                    Level = (byte)GetLevel(battleNpc).GetValueOrDefault(0),
-                    X = battleNpc.Position.X,
-                    Y = battleNpc.Position.Y,
-                    Z = battleNpc.Position.Z,
-                    IsAdapted = isAdapted,
-                    IsMutated = isMutated,
-                    IsInCombat = isInCombat,
-                    HasBeenInCombat = hasBeenInCombat,
-                    TimeStamp = now,
-                    Element = elementType,
-                    TerritoryId = Convert.ToInt32(clientState.TerritoryType),
-                    MapId = (int)clientState.MapId,
-                    InstanceId = _instanceGuid
-                };
 
-                _enemies.Add(npcId, newEnemy);
-                log.Verbose(
-                    $"Added new enemy: {newEnemy.MobName} (ID: {newEnemy.MobIngameId}, Level: {newEnemy.Level}, In Combat: {newEnemy.IsInCombat})");
+            var current = Read(enemy, context.VisitId, context.TerritoryId, context.MapId,
+                context.ObservedAtMs / 1000, previous);
+            next[id] = current;
+            if (current.IsDead)
+            {
+                if (previous is { IsDead: false })
+                    record(ToObservation(current, context, ObservationKind.EnemyDied));
+                continue;
             }
+
+            if (takeSnapshot)
+                snapshot.Add(current.Position);
+
+            if (previous == null)
+                record(ToObservation(current, context, ObservationKind.EnemyAppeared));
+            else if (takeSnapshot || previous.ForayLevel != current.ForayLevel ||
+                     previous.Position.IsAdapted != current.Position.IsAdapted ||
+                     previous.Position.IsMutated != current.Position.IsMutated)
+                record(ToObservation(current, context, ObservationKind.EnemySample));
         }
-    }
 
-    /// <summary>
-    /// Removes enemies that haven't been seen in a while
-    /// </summary>
-    private void RemoveOutdatedEnemies()
-    {
-        //Clear ANYTHING not in current objectTable
-        var outdatedEnemies = _enemies.Keys
-                                      .Where(id => !objectTable.Any(obj => obj is IBattleNpc battleNpc &&
-                                                                           battleNpc.GameObjectId == id))
-                                      .ToList();
-        log.Verbose($"Found {outdatedEnemies.Count} outdated enemies to remove of {_enemies.Count} total enemies");
-        foreach (var enemyId in outdatedEnemies)
+        foreach (var (id, enemy) in tracked)
         {
-            var outdatedEnemy = _enemies[enemyId];
-            if (_enemies.Remove(enemyId))
-            {
-                log.Verbose($"Removed outdated enemy: {outdatedEnemy.MobName} (ID: {outdatedEnemy.MobIngameId})");
-            }
+            if (!next.ContainsKey(id))
+                record(ToObservation(enemy, context, ObservationKind.EnemyDisappeared));
         }
+
+        tracked = next;
+        return snapshot;
     }
 
-    /// <summary>
-    /// Dispose resources
-    /// </summary>
-    public void Dispose()
-    {
-        Dispose(true); // Call the new Dispose method
-        GC.SuppressFinalize(this);
-    }
+    private static bool IsEnemy(IBattleNpc enemy) =>
+        enemy.BattleNpcKind == BattleNpcSubKind.Combatant && enemy.BaseId != 0 && enemy.Address != IntPtr.Zero;
 
-    // Add the protected virtual Dispose method
-    protected virtual void Dispose(bool disposing)
+    private unsafe TrackedEnemy Read(IBattleNpc enemy, Guid visit, uint territory, uint map, long now,
+        TrackedEnemy? previous)
     {
-        if (_disposed)
-            return;
-
-        if (disposing)
+        var dead = enemy.CurrentHp == 0;
+        var native = (BattleChara*)enemy.Address;
+        var forayLevel = native->ForayInfo.Level;
+        var element = native->ForayInfo.Element;
+        var inCombat = !dead && (enemy.TargetObject != null || enemy.CurrentHp < enemy.MaxHp);
+        var adapted = dead ? previous?.Position.IsAdapted == true :
+            enemy.StatusList.Any(status => adaptationIds.Value.Contains(status.StatusId));
+        var mutated = dead ? previous?.Position.IsMutated == true :
+            enemy.StatusList.Any(status => mutationIds.Value.Contains(status.StatusId));
+        var name = dataManager.GetExcelSheet<BNpcName>().TryGetRow(enemy.NameId, out var row)
+            ? row.Singular.ExtractText()
+            : string.Empty;
+        byte? level = forayLevel > 0 ? forayLevel : dead ? previous?.ForayLevel : null;
+        var position = new EnemyPosition
         {
-            // Unsubscribe from events
-            clientState.TerritoryChanged -= OnTerritoryChanged;
+            MobIngameId = enemy.BaseId,
+            MobName = name,
+            Level = level ?? 0,
+            X = enemy.Position.X,
+            Y = enemy.Position.Y,
+            Z = enemy.Position.Z,
+            IsAdapted = adapted,
+            IsMutated = mutated,
+            TimeStamp = now,
+            Element = element.ToString(CultureInfo.InvariantCulture),
+            IsInCombat = inCombat,
+            HasBeenInCombat = inCombat || previous?.Position.HasBeenInCombat == true,
+            TerritoryId = (int)territory,
+            MapId = (int)map,
+            InstanceId = visit
+        };
 
-            // Clear collections
-            _enemies.Clear();
-            _inCombatHistory.Clear();
-        }
-
-        _disposed = true;
+        return new TrackedEnemy(previous?.Id ?? Guid.NewGuid(), position, dead, enemy.Level, level, element);
     }
+
+    private static Observation ToObservation(TrackedEnemy enemy, Observation context, ObservationKind kind) =>
+        context with
+        {
+            Kind = kind,
+            GameId = enemy.Position.MobIngameId,
+            EnemyTrackId = enemy.Id,
+            X = enemy.Position.X,
+            Y = enemy.Position.Y,
+            Z = enemy.Position.Z,
+            EnemyElementalLevel = ForayService.IsEureka(context.TerritoryId) ? enemy.ForayLevel : null,
+            EnemyKnowledgeLevel = ForayService.IsOccultCrescent(context.TerritoryId) ? enemy.ForayLevel : null,
+            EnemyCombatLevel = enemy.CombatLevel,
+            ElementId = ForayService.IsEureka(context.TerritoryId) ? enemy.ElementId : null,
+            IsAdapted = enemy.Position.IsAdapted,
+            IsMutated = enemy.Position.IsMutated,
+            IsInCombat = enemy.Position.IsInCombat
+        };
+
+    private static HashSet<uint> FindStatuses(IDataManager dataManager, params string[] names) =>
+        dataManager.GetExcelSheet<Status>(ClientLanguage.English)
+            .Where(row => names.Contains(row.Name.ExtractText(), StringComparer.OrdinalIgnoreCase))
+            .Select(row => row.RowId).ToHashSet();
+
+    private sealed record TrackedEnemy(Guid Id, EnemyPosition Position, bool IsDead, byte CombatLevel,
+        byte? ForayLevel, byte ElementId);
 }

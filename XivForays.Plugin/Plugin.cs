@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
@@ -31,6 +31,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IClientState ClientState { get; private set; } = null!;
 
+    [PluginService]
+    internal static ICondition Condition { get; private set; } = null!;
     [PluginService]
     internal static IChatGui ChatGui { get; private set; } = null!;
 
@@ -102,10 +104,6 @@ public sealed class Plugin : IDalamudPlugin
             if (!ApiKeyWindow.IsOpen)
                 ApiKeyWindow.Toggle();
         }
-        else
-        {
-            Log.Info($"API key found: '{Configuration.SystemConfiguration.ApiKey}'");
-        }
     }
 
     private void SetupServices()
@@ -139,6 +137,7 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton(this);
         services.AddSingleton(TextureProvider);
         services.AddSingleton(ChatGui);
+        services.AddSingleton(Condition);
         services.AddSingleton(PluginInterface);
         services.AddSingleton(CommandManager);
         services.AddSingleton(ClientState);
@@ -158,7 +157,11 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton<EnemyLocationGatherer>();
         services.AddSingleton<ForayService>();
         services.AddAllTypesImplementing<ITab>();
-        services.AddAllTypesImplementing<IModule>();
+        services.AddSingleton<ObservationService>();
+        services.AddSingleton<IModule>(sp => sp.GetRequiredService<ObservationService>());
+        services.AddSingleton<IModule>(sp => sp.GetRequiredService<FateModule>());
+        services.AddSingleton<IModule>(sp => sp.GetRequiredService<EnemyLocationGatherer>());
+        services.AddSingleton<IModule, ForaySignalModule>();
         services.AddSingleton<MainWindow>();
         services.AddSingleton<ApiKeyWindow>();
         return services;

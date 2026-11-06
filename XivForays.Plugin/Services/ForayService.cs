@@ -1,55 +1,48 @@
 using System;
-using System.Linq;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
-using Lumina.Excel.Sheets;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Services;
 
-public class ForayService : IDisposable
+public sealed class ForayService : IDisposable
 {
     private readonly TerritoryService territoryService;
-    private readonly Configuration.Configuration configuration;
     private readonly IClientState clientState;
-    private readonly IPluginLog log;
-    private TerritoryType? lastTerritory;
+    private readonly ICondition condition;
+    private uint territoryId;
+    private uint expectedMapId;
 
-    public ForayService(
-        Plugin plugin,
-        TerritoryService territoryService, IClientState clientState, IPluginLog log)
+    public Guid VisitId { get; private set; } = Guid.NewGuid();
+
+    public ForayService(TerritoryService territoryService, IClientState clientState, ICondition condition)
     {
         this.territoryService = territoryService;
-        configuration = plugin.Configuration;
-
         this.clientState = clientState;
-        this.log = log;
+        this.condition = condition;
+        OnTerritoryChanged(clientState.TerritoryType);
         clientState.TerritoryChanged += OnTerritoryChanged;
-
-        if (clientState.IsLoggedIn)
-            this.OnTerritoryChanged(clientState.TerritoryType);
     }
+
+    internal static bool IsEureka(uint territory) => territory is 732 or 763 or 795 or 827;
+    internal static bool IsOccultCrescent(uint territory) => territory is 1252 or 1346;
 
     public bool IsInRecordableTerritory()
     {
-        return clientState.IsLoggedIn && lastTerritory != null && IsForayTerritory(lastTerritory) &&
-               lastTerritory?.Map.Value.RowId == clientState.MapId;
+        if (!clientState.IsLoggedIn || territoryId != clientState.TerritoryType ||
+            condition[ConditionFlag.BetweenAreas] || condition[ConditionFlag.BetweenAreas51])
+            return false;
+
+        return expectedMapId != 0 && expectedMapId == clientState.MapId;
     }
 
-    private bool IsForayTerritory(TerritoryType? territoryType)
+    private void OnTerritoryChanged(uint territory)
     {
-        var forayNames = new[] { "Eureka", "Zadnor", "Bozjan Southern Front","South Horn" };
-        return territoryType != null &&
-               forayNames.Any(p => territoryType?.PlaceName.Value.Name.ExtractText().Contains(p) ?? false);
+        territoryId = territory;
+        expectedMapId = IsEureka(territory) || IsOccultCrescent(territory) || territory is 920 or 975
+            ? territoryService.GetTerritoryForId(territory)?.Map.RowId ?? 0
+            : 0;
+        VisitId = Guid.NewGuid();
     }
 
-    private void OnTerritoryChanged(uint territoryId)
-    {
-        lastTerritory = territoryService.GetTerritoryForId(territoryId);
-    }
-
-    public void Dispose()
-    {
-        territoryService.Dispose();
-        clientState.TerritoryChanged -= OnTerritoryChanged;
-        lastTerritory = null;
-    }
+    public void Dispose() => clientState.TerritoryChanged -= OnTerritoryChanged;
 }

@@ -13,7 +13,7 @@ using XivMate.DataGathering.Forays.Dalamud.Services;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Windows.Tabs;
 
-public class DebugTab(
+internal class DebugTab(
     FateModule fateModule,
     EnemyTrackingService enemyTrackingService,
     IGameGui gameGui,
@@ -40,7 +40,7 @@ public class DebugTab(
 
         if (Debug)
         {
-            enemies = enemyTrackingService.UpdateAndGetEnemies();
+            enemies = enemyTrackingService.GetVisibleEnemies();
 
             RenderTest();
 

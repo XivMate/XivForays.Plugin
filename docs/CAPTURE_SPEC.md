@@ -37,3 +37,33 @@ The baseline has no FATE start/progress upload. The reward module returns before
 | Coffer, bunny, pot and carrot positions and grades | Maps find/reward locations and helps separate routes and rewards by grade. |
 | Chain number | Separates chain effects from level, weather and mutation effects in drop analyses. |
 | Occult Crescent knowledge levels and Critical Encounters | Enables later comparisons of enemy/reward level gaps and CE timing and geography. |
+
+## Friends release capture
+
+Recording remains opt-in. The zone gate uses territory IDs for the four Eureka zones (732, 763, 795, 827), Bozjan Southern Front (920), Zadnor (975) and both Occult Crescent Horns (1252, 1346), with the expected map and a loaded character outside zone transitions. A shared random visit ID resets at territory changes. It identifies one recorder's visit, never a shared server instance. No transition synthesizes a kill or event end.
+
+The original two POST routes retain their JSON shape and collection layout. Live enemy rows refresh the native foray level at each sample and drop stale dead rows. Zero still means the native value is unavailable. Mutation and adaptation are checked independently against status IDs resolved from the English game sheet. The legacy FATE endpoint still accepts observed disappearance as a completion and uses the initial centre and radius for compatibility.
+
+### Versioned observations
+
+`POST /api/forays/observations` carries an object with `schemaVersion: 1`, a random `batchId` GUID and an `observations` array of 1–256 typed records. JSON property names use camelCase. Omitted optional fields mean unavailable or inapplicable. Every record carries numeric `kind`, `observedAtMs` (UTC Unix milliseconds), `visitId`, `territoryId`, `mapId` and optional `weatherId` (the live client weather row). In Eureka, player context includes current and effective elemental levels and a synced flag when available. In Occult Crescent, it includes current and effective Knowledge Levels. Both values come from the game's content-value keys. No generic job level substitutes for an unavailable elemental or Knowledge Level.
+
+| Kind | Trigger and specific fields |
+| --- | --- |
+| 1–4 enemy appeared / sampled / died / disappeared | Poll every 500 ms. Sample at roughly 5 seconds and when elemental/Knowledge Level or mutation/adaptation changes. Includes base ID (`gameId`), random `enemyTrackId`, XYZ, applicable elemental/Knowledge Level and element ID, combat level, mutation/adaptation flags and current combat heuristic. A visible transition to zero HP produces a death. Disappearance uses the last observed XYZ and the time/weather when loss was noticed. Visits do not share enemy IDs. |
+| 5–8 FATE first seen running / updated / terminal / disappeared | Poll every 500 ms. Includes FATE ID, observed centre/radius, game start epoch seconds, progress and state. Emits an update on progress or geometry changes. Ended/Failed is terminal. A missing or replaced entry is a separate observation. |
+| 9 loot | A recognized English self-award game notice with a single structured item link contributes item ID and quantity where the notice exposes it. Includes current player-level/weather context. Does not assign the item to a kill, FATE or chest. |
+| 10 chain | A recognized English game-generated EXP chain notice contributes the chain number and current context. Does not assign it to an enemy. |
+| 11 treasure | Poll every second. Reports recognized coffers, Happy Bunnies, pots and carrots by base ID and world XYZ, on first visibility or movement of at least two world units. `treasureKind` 1/2/3/4 means coffer/bunny/pot/carrot. `treasureGrade` 1/2/3 means bronze/silver/gold where the model or static name identifies it. Missing grade means unknown or inapplicable. |
+| 12 Critical Encounter | Poll native dynamic events every second in the Horns. Emits first visibility, changed state/start/progress/geometry and an inactive edge if an entry disappears. Includes dynamic event ID, native start timestamp, seconds left when present, progress, state and marker centre/radius when populated. State values 0/1/2/3 mean inactive/register/warmup/battle. |
+
+The worker attempts one batch every two seconds. The in-memory queue retains up to 4,096 pending events plus one retry batch. Older pending events are dropped if it fills. Unsupported or rejected batches are dropped independently of legacy uploads. A failed transport retries the same batch ID. MongoDB stores one document per batch in `MongoForayObservationBatch`. Its deterministic `_id` combines a SHA-256 reference derived from the authenticated GUID and the batch ID so replay of the same batch is idempotent. Fields use PascalCase. BestiaryGeneration does not read this collection yet. No migration or backfill is required.
+
+### Remaining evidence gaps
+
+- An enemy with zero native foray level remains unknown. Check late-loaded, mutated and adapted enemies in game before treating reported levels as complete.
+- Brief visibility between polls, deaths outside view, and IDs recycled between polls can be missed. Appearance/disappearance can mean draw range or a visibility change. A visible death does not prove recorder or party credit.
+- A controlled run is still needed to establish all credited kills, reliable no-drop denominators and exact kill/loot/chain joins. The English notice filters can miss other client languages and award formats. Treasure sightings do not establish a specific hunt, owner, opening or award.
+- Confirm treasure recognition, CE marker geometry and knowledge/elemental sync values in the client. CE samples distinguish registration from battle. An inactive edge records disappearance, which may have other causes than successful completion.
+
+[Native weather API](https://github.com/aers/FFXIVClientStructs/blob/main/FFXIVClientStructs/FFXIV/Client/Game/WeatherManager.cs) · [Player content levels](https://github.com/aers/FFXIVClientStructs/blob/main/FFXIVClientStructs/FFXIV/Client/Game/UI/PlayerState.cs) · [Dynamic event structure](https://github.com/aers/FFXIVClientStructs/blob/main/FFXIVClientStructs/FFXIV/Client/Game/InstanceContent/DynamicEventContainer.cs) · [Coffer model extraction](https://github.com/Sansflaire/LimLoToolkit/blob/main/docs/occult-crescent.md)
