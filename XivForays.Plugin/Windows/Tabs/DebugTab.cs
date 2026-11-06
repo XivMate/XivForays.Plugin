@@ -4,10 +4,6 @@ using System.Linq;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Bindings.ImGui;
 using XivMate.DataGathering.Forays.Dalamud.Gathering.Fate;
-using Dalamud.Plugin.Services;
-using Dalamud.Utility;
-using FFXIVClientStructs.FFXIV.Client.UI;
-using FFXIVClientStructs.FFXIV.Component.GUI;
 using XivMate.DataGathering.Forays.Dalamud.Models;
 using XivMate.DataGathering.Forays.Dalamud.Services;
 
@@ -15,10 +11,7 @@ namespace XivMate.DataGathering.Forays.Dalamud.Windows.Tabs;
 
 internal class DebugTab(
     FateModule fateModule,
-    EnemyTrackingService enemyTrackingService,
-    IGameGui gameGui,
-    IPluginLog log,
-    IGameInventory inventory) : ITab
+    EnemyTrackingService enemyTrackingService) : ITab
 {
     private bool Debug;
 
@@ -41,8 +34,6 @@ internal class DebugTab(
         if (Debug)
         {
             enemies = enemyTrackingService.GetVisibleEnemies();
-
-            RenderTest();
 
             ImGui.TextUnformatted($"Fates on map {fateModule.ActiveFates.Count()}");
             RenderFateTable();
@@ -115,35 +106,6 @@ internal class DebugTab(
                 // var dateTime = DateTimeOffset.FromUnixTimeSeconds(fate.TimeStamp).DateTime;
                 // ImGui.TextUnformatted(dateTime.ToString("HH:mm:ss"));
             }
-        }
-    }
-
-    private void RenderTest()
-    {
-        unsafe
-        {
-            //Get Addon
-            var addonPtr = gameGui.GetAddonByName("FateReward", 1);
-            if (addonPtr.IsNull)
-            {
-                ImGui.TextUnformatted("Addon is null");
-                return;
-            }
-
-            var unitBase = (AtkUnitBase*)addonPtr.Address;
-            if (!unitBase->IsVisible)
-            {
-                ImGui.TextUnformatted("UnitBase is not visible");
-                return;
-            }
-
-            var addon = (AddonFateReward*)addonPtr.Address;
-
-            ImGui.TextUnformatted($"UnitBase is visible");
-            var exp = addon->AtkValues[8].String;
-            ImGui.TextUnformatted($"Exp: {exp}");
-
-            log.Debug($"Fate Window visible");
         }
     }
 

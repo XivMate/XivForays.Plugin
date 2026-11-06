@@ -1,55 +1,47 @@
-﻿using System;
+using System;
 using System.Numerics;
-using Dalamud.Interface.Windowing;
-using Dalamud.Plugin.Services;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Windowing;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Windows;
 
-public class ApiKeyWindow : Window, IDisposable
+public sealed class ApiKeyWindow : Window
 {
     private readonly Plugin plugin;
-    private readonly IPluginLog log;
-    private readonly Configuration.Configuration configuration;
+    private string key;
+    private bool allowCrowdsourcing;
+    private string error = "";
 
-    public ApiKeyWindow(Plugin plugin, IPluginLog log) :
-        base("XivForays API Key")
+    public ApiKeyWindow(Plugin plugin) : base("XivForays API Key")
     {
         this.plugin = plugin;
-        this.log = log;
-        configuration = plugin.Configuration;
         Size = new Vector2(600, 250);
-        key = configuration.SystemConfiguration.ApiKey;
-        canCrowdSourceData = configuration.CanCrowdsourceData;
+        key = plugin.Configuration.SystemConfiguration.ApiKey;
+        allowCrowdsourcing = plugin.Configuration.CanCrowdsourceData;
     }
-
-    public void Dispose() { }
-    private string key;
-    private bool canCrowdSourceData;
 
     public override void Draw()
     {
-        if (ImGui.Checkbox("Enable Crowdsourcing data", ref canCrowdSourceData))
-        {
-            log.Debug($"CanCrowdsourceData updated to {canCrowdSourceData}");
-        }
-
-        if (ImGui.InputText("Api Key##ApiKey", ref key))
-        {
-            key = key.Trim();
-            log.Debug($"ApiKey updated to {key}");
-        }
-
+        ImGui.Checkbox("Enable crowdsourcing", ref allowCrowdsourcing);
+        ImGui.InputText("API key", ref key, 64, ImGuiInputTextFlags.Password);
         if (ImGui.Button("Save"))
         {
-            configuration.SystemConfiguration.ApiKey = key;
-            log.Debug($"Saving API Key: '{configuration.SystemConfiguration.ApiKey}'");
-            configuration.CanCrowdsourceData = canCrowdSourceData;
-            log.Debug($"Saving CanCrowdsourceData: '{configuration.CanCrowdsourceData}'");
+            var trimmedKey = key.Trim();
+            if ((allowCrowdsourcing || trimmedKey.Length > 0) && !Guid.TryParse(trimmedKey, out _))
+            {
+                error = "Enter the API key you received from the Forays website.";
+                return;
+            }
+
+            var configuration = plugin.Configuration;
+            configuration.SystemConfiguration.ApiKey = trimmedKey;
+            configuration.CanCrowdsourceData = allowCrowdsourcing;
             configuration.Save();
-            Toggle();
             plugin.ReloadModules();
-            log.Info("Saved configuration");
+            Toggle();
         }
+
+        if (error.Length > 0)
+            ImGui.TextUnformatted(error);
     }
 }

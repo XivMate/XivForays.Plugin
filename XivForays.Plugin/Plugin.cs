@@ -4,8 +4,6 @@ using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.UI;
-using Lumina.Excel.Sheets;
 using Microsoft.Extensions.DependencyInjection;
 using XivMate.DataGathering.Forays.Dalamud.Extensions;
 using XivMate.DataGathering.Forays.Dalamud.Gathering;
@@ -54,12 +52,6 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IFramework Framework { get; private set; } = null!;
 
-    [PluginService]
-    internal static IAddonEventManager AddonEventManager { get; private set; } = null!;
-
-    [PluginService]
-    public static IGameInventory GameInventory { get; private set; } = null;
-
     private const string CommandName = "/xivforays";
 
     public Configuration.Configuration Configuration { get; init; }
@@ -75,13 +67,10 @@ public sealed class Plugin : IDalamudPlugin
         Configuration = PluginInterface.GetPluginConfig() as Configuration.Configuration ??
                         new Configuration.Configuration();
 
-        var resourcesPath = PluginInterface.AssemblyLocation.Directory?.FullName!;
-
         SetupServices();
         InitializeModules();
 
         MainWindow = provider?.GetService<MainWindow>() ?? throw new InvalidOperationException();
-        ApiKeyWindow = provider.GetService<ApiKeyWindow>() ?? throw new InvalidOperationException();
         PluginInterface.UiBuilder.Draw += DrawUI;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUI;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
@@ -89,11 +78,9 @@ public sealed class Plugin : IDalamudPlugin
         
         RegisterCommands();
 
-
-
         var tabs = provider.GetServices<ITab>();
         ConfigWindow = new ConfigWindow(this, tabs, Log);
-        ApiKeyWindow = new ApiKeyWindow(this, Log);
+        ApiKeyWindow = new ApiKeyWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
         WindowSystem.AddWindow(ApiKeyWindow);
@@ -132,7 +119,6 @@ public sealed class Plugin : IDalamudPlugin
     private ServiceCollection ConfigureServices()
     {
         var services = new ServiceCollection();
-        services.AddAutoMapper(typeof(Plugin).Assembly);
 
         services.AddSingleton(this);
         services.AddSingleton(TextureProvider);
@@ -146,8 +132,6 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton(FateTable);
         services.AddSingleton(ObjectTable);
         services.AddSingleton(Log);
-        services.AddSingleton(AddonEventManager);
-        services.AddSingleton(GameInventory);
         services.AddSingleton(GameGui);
         services.AddSingleton<FateModule>();
         services.AddSingleton<SchedulerService>();
@@ -163,10 +147,8 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton<IModule>(sp => sp.GetRequiredService<EnemyLocationGatherer>());
         services.AddSingleton<IModule, ForaySignalModule>();
         services.AddSingleton<MainWindow>();
-        services.AddSingleton<ApiKeyWindow>();
         return services;
     }
-
 
     public void Dispose()
     {
@@ -174,7 +156,6 @@ public sealed class Plugin : IDalamudPlugin
 
         ConfigWindow.Dispose();
         MainWindow.Dispose();
-        ApiKeyWindow.Dispose(); // Add this line
 
         CommandManager.RemoveHandler(CommandName);
         provider.Dispose();

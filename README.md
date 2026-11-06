@@ -1,69 +1,19 @@
-# XivMate Data Gathering Forays Dalamud
+# XivMate Foray Data Gathering
 
-XivMate Data Gathering Forays Dalamud is a plugin for Dalamud that crowdsources data for Adventuring Forays in Final Fantasy XIV, specifically for Eureka, Zadnor, and Bozjan Southern Front. This plugin collects and uploads data about FATEs (Full Active Time Events) in these areas to a central server for analysis and sharing.
+An opt-in Dalamud plugin that contributes world observations from Eureka, Bozjan Southern Front, Zadnor and Occult Crescent to the XivForays bestiary project.
 
-## Features
+## What we collect
 
-- **FATE Tracking**: Automatically tracks active FATEs in specified Foray territories.
-- **Data Upload**: Uploads FATE data to a specified API endpoint.
-- **Configuration**: Provides a configuration window for setting API URL and API Key.
-- **UI Integration**: Includes a main window and configuration window for user interaction.
+Crowdsourcing starts off for a fresh install. With it enabled, the plugin sends the following while you are in a supported zone:
 
-## Prerequisites
+- Nearby enemies' game IDs, game-defined names, positions, observed levels and elements, mutation/adaptation, combat state, and when enemies appear, move, die in view or leave view.
+- FATE game IDs and game-defined names, centre, radius, start and observation times, progress, state and observed end or disappearance. Occult Crescent Critical Encounters contribute their game IDs, timers, progress, states and available map marker positions.
+- Recognized coffers, bunnies, pots and carrots with game IDs, locations and any recognized grades.
+- Zone and map IDs, UTC timestamps, current weather, and your current and effective elemental or Knowledge Level where available. Eureka observations can also include whether your elemental level is synced.
+- Recognized English game loot and chain notices contribute the item ID, quantity when available, or chain number. The game notice is read locally to get those numbers and discarded. A visible death does not tell us who got kill credit, and loot is recorded separately.
 
-- XIVLauncher, FINAL FANTASY XIV, and Dalamud must be installed and the game must have been run with Dalamud at least once.
-- A .NET Core 8 SDK must be installed and configured.
+The plugin sends its version, random IDs for visits and enemy tracks, and the API key you enter to authenticate uploads. The key is saved locally in your Dalamud plugin configuration. The server can link uploads made with the same key. Legacy enemy and FATE records retain the existing key reference, and the new observation stream stores a one-way reference to it. The server receives your connection IP as part of normal web traffic.
 
-## Getting Started
+The plugin sends no chat text, chat sender names, character or player names, character or account IDs, player positions, party lists, inventory contents, passwords, screenshots, or files from your computer. It does not upload Dalamud or ACT logs. Enemy and event names come from the game. Turn off **Crowdsource data** in `/xivforays config` under **General** to stop collecting and clear pending uploads. A request already sent may still finish.
 
-### Cloning the Repository
-
-To begin, clone this repository to your local machine:
-
-```sh
-git clone https://github.com/yourusername/XivMate.DataGathering.Forays.Dalamud.git
-```
-
-### Building the Project
-
-1. Open `XivMate.DataGathering.Forays.Dalamud.sln` in your C# editor of choice (e.g., Visual Studio 2022 or JetBrains Rider).
-2. Build the solution. By default, this will build a `Debug` build, but you can switch to `Release` in your IDE.
-3. The resulting plugin can be found at `XivMate.DataGathering.Forays.Dalamud/bin/x64/Debug/XivMate.DataGathering.Forays.Dalamud.dll` (or `Release` if appropriate).
-
-### Activating the Plugin In-Game
-
-1. Launch the game and use `/xlsettings` in chat or `xlsettings` in the Dalamud Console to open the Dalamud settings.
-2. Go to `Experimental`, and add the full path to the `XivMate.DataGathering.Forays.Dalamud.dll` to the list of Dev Plugin Locations.
-3. Use `/xlplugins` (chat) or `xlplugins` (console) to open the Plugin Installer.
-4. Go to `Dev Tools > Installed Dev Plugins`, and enable `XivMate.DataGathering.Forays.Dalamud`.
-
-### Configuration
-
-1. Use `/xivmate` in chat to open the main window.
-2. Click on "Show Settings" to open the configuration window.
-3. Set the API URL and API Key in the System tab.
-
-## Project Structure
-
-- **Configuration**: Contains configuration classes for the plugin.
-- **Extensions**: Contains extension methods used throughout the plugin.
-- **Gathering**: Contains modules for gathering data, including the `FateModule`.
-- **Models**: Contains data models used by the plugin.
-- **Services**: Contains services for interacting with external APIs and game data.
-- **Windows**: Contains UI windows for the plugin.
-
-## License
-
-This project is licensed under the GNU Affero General Public License v3.0. See the [LICENSE.md](LICENSE.md) file for details.
-
-## Contributing
-
-Contributions are welcome! Please fork the repository and submit a pull request with your changes.
-
-## Contact
-
-For questions or support, please join the [Dalamud Discord](https://discord.gg/holdshift).
-
----
-
-This project is a template for creating Dalamud plugins. For more detailed questions, come ask in the Discord.
+See the [capture specification](docs/CAPTURE_SPEC.md) for field names and limits.

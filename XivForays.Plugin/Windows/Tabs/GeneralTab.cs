@@ -1,6 +1,5 @@
 using System.Linq;
 using Dalamud.Bindings.ImGui;
-using XivMate.DataGathering.Forays.Dalamud.Gathering.Enemy;
 using XivMate.DataGathering.Forays.Dalamud.Gathering.Fate;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Windows.Tabs;
@@ -10,8 +9,7 @@ namespace XivMate.DataGathering.Forays.Dalamud.Windows.Tabs;
 /// </summary>
 internal class GeneralTab(
     Plugin plugin,
-    FateModule fateModule,
-    EnemyLocationGatherer enemyLocationGatherer) : ITab
+    FateModule fateModule) : ITab
 {
     /// <inheritdoc />
     public int Index => 1;
