@@ -80,7 +80,7 @@ public class MainWindow : Window, IDisposable
                 {
                     ImGui.TextUnformatted("Invalid territory.");
                 }
-                if(Plugin.DataManager.GetExcelSheet<MapType>().TryGetRow(Plugin.ClientState.MapId, out var mapRow))
+                if(Plugin.DataManager.GetExcelSheet<Map>().TryGetRow(Plugin.ClientState.MapId, out var mapRow))
                 {
                     ImGui.TextUnformatted(
                         $"(Map {mapRow.RowId})");
