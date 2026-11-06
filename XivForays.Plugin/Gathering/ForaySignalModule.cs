@@ -62,7 +62,8 @@ internal sealed partial class ForaySignalModule(
 
         // Check the system channel before accessing the message. Only typed numbers leave this method.
         var kind = (XivChatType)chat.LogKind;
-        if (kind is not (XivChatType.LootNotice or XivChatType.Progress or XivChatType.SystemMessage))
+        if (chat.SourceKind != XivChatRelationKind.LocalPlayer ||
+            kind is not (XivChatType.LootNotice or XivChatType.SystemError))
             return;
 
         if (objects.LocalPlayer == null || !forayService.IsInRecordableTerritory())
@@ -70,7 +71,7 @@ internal sealed partial class ForaySignalModule(
 
         var message = chat.OriginalMessage;
         var text = message.ExtractText().Trim();
-        if (kind is XivChatType.Progress or XivChatType.SystemMessage)
+        if (kind == XivChatType.SystemError)
         {
             var chain = ChainNotice().Match(text);
             if (chain.Success && uint.TryParse(chain.Groups[1].ValueSpan, NumberStyles.None,
@@ -79,6 +80,11 @@ internal sealed partial class ForaySignalModule(
                 observations.Record(observations.GetContext() with { Kind = ObservationKind.Chain, ChainNumber = count });
                 return;
             }
+
+            if (chat.TargetKind is (XivChatRelationKind.EngagedEnemy or XivChatRelationKind.UnengagedEnemy) &&
+                text.StartsWith("You defeat ", StringComparison.Ordinal))
+                observations.Record(observations.GetContext() with { Kind = ObservationKind.SelfDefeat });
+            return;
         }
 
         if (!text.StartsWith("You obtain ", StringComparison.Ordinal))
@@ -268,7 +274,7 @@ internal sealed partial class ForaySignalModule(
         encounters = current;
     }
 
-    [GeneratedRegex(@"^EXP chain #([0-9]+)!$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^EXP chain #([0-9]+)!", RegexOptions.CultureInvariant)]
     private static partial Regex ChainNotice();
 
     [GeneratedRegex(@"^You obtain ([0-9]+) ", RegexOptions.CultureInvariant)]

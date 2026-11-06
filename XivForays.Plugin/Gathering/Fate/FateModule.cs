@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
 using Dalamud.Game.ClientState.Fates;
 using Dalamud.Plugin.Services;
 using XivMate.DataGathering.Forays.Dalamud.Models;
@@ -20,7 +21,7 @@ internal sealed class FateModule(
     ObservationService observations) : IModule
 {
     private readonly Dictionary<uint, TrackedFate> fates = new();
-    private readonly ConcurrentQueue<Models.Fate> queue = new();
+    private ConcurrentQueue<Models.Fate> queue = new();
     private Guid visitId;
     private volatile bool enabled;
 
@@ -43,7 +44,7 @@ internal sealed class FateModule(
             scheduler.CancelScheduledTask(FateTick);
             scheduler.CancelScheduledTask(FateUpload);
             fates.Clear();
-            queue.Clear();
+            queue = new();
         }
     }
 
@@ -153,19 +154,24 @@ internal sealed class FateModule(
             State = (byte)fate.State
         });
 
-    private void FateUpload()
+    private void FateUpload(CancellationToken cancellationToken)
     {
-        if (!enabled || !queue.TryDequeue(out var fate))
+        var pending = queue;
+        if (cancellationToken.IsCancellationRequested || !enabled || !pending.TryDequeue(out var fate))
             return;
 
         try
         {
-            api.UploadFate(fate).GetAwaiter().GetResult();
+            api.UploadFate(fate, cancellationToken).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Disabling sharing or unloading cancels this worker.
         }
         catch (Exception ex)
         {
-            if (enabled && queue.Count < 32)
-                queue.Enqueue(fate);
+            if (!cancellationToken.IsCancellationRequested && enabled && pending.Count < 32)
+                pending.Enqueue(fate);
             log.Warning($"FATE completion upload failed ({ex.GetType().Name}).");
         }
     }

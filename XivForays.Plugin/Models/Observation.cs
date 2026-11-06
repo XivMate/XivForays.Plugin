@@ -17,7 +17,8 @@ internal enum ObservationKind
     Loot = 9,
     Chain = 10,
     Treasure = 11,
-    CriticalEncounter = 12
+    CriticalEncounter = 12,
+    SelfDefeat = 13
 }
 
 internal sealed record Observation

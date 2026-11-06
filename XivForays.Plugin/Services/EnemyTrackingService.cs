@@ -120,6 +120,9 @@ public sealed class EnemyTrackingService(IObjectTable objectTable, IDataManager 
         var name = dataManager.GetExcelSheet<BNpcName>().TryGetRow(enemy.NameId, out var row)
             ? row.Singular.ExtractText()
             : string.Empty;
+        var displayName = enemy.Name.TextValue;
+        if (name.Equals(displayName, StringComparison.OrdinalIgnoreCase))
+            name = displayName;
         byte? level = forayLevel > 0 ? forayLevel : dead ? previous?.ForayLevel : null;
         var position = new EnemyPosition
         {

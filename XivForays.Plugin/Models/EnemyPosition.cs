@@ -15,7 +15,7 @@ public class EnemyPosition
     /// <summary>
     /// The name of the mob
     /// </summary>
-    public string MobName { get; set; }
+    public string MobName { get; set; } = string.Empty;
 
     /// <summary>
     /// The level of the mob
@@ -55,7 +55,7 @@ public class EnemyPosition
     /// <summary>
     /// The element of the mob if applicable (e.g., in Eureka content)
     /// </summary>
-    public string Element { get; set; }
+    public string Element { get; set; } = string.Empty;
 
     /// <summary>
     /// Whether the mob is currently in combat

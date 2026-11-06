@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 using Dalamud.Plugin.Services;
 using XivMate.DataGathering.Forays.Dalamud.Models;
 using XivMate.DataGathering.Forays.Dalamud.Services;
@@ -14,7 +15,7 @@ internal sealed class EnemyLocationGatherer(
     IPluginLog log,
     ApiService api) : IModule
 {
-    private readonly ConcurrentQueue<List<EnemyPosition>> queue = new();
+    private ConcurrentQueue<List<EnemyPosition>> queue = new();
     private long lastSnapshot;
     private volatile bool enabled;
 
@@ -37,7 +38,7 @@ internal sealed class EnemyLocationGatherer(
             scheduler.CancelScheduledTask(EnemyTick);
             scheduler.CancelScheduledTask(EnemyUpload);
             enemies.Reset();
-            queue.Clear();
+            queue = new();
         }
     }
 
@@ -68,19 +69,24 @@ internal sealed class EnemyLocationGatherer(
         }
     }
 
-    private void EnemyUpload()
+    private void EnemyUpload(CancellationToken cancellationToken)
     {
-        if (!enabled || !queue.TryDequeue(out var snapshot))
+        var pending = queue;
+        if (cancellationToken.IsCancellationRequested || !enabled || !pending.TryDequeue(out var snapshot))
             return;
 
         try
         {
-            api.UploadEnemyPosition(snapshot).GetAwaiter().GetResult();
+            api.UploadEnemyPosition(snapshot, cancellationToken).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Disabling sharing or unloading cancels this worker.
         }
         catch (Exception ex)
         {
-            if (enabled && queue.Count < 10)
-                queue.Enqueue(snapshot);
+            if (!cancellationToken.IsCancellationRequested && enabled && pending.Count < 10)
+                pending.Enqueue(snapshot);
             log.Warning($"Enemy position upload failed ({ex.GetType().Name}).");
         }
     }

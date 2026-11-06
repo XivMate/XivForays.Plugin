@@ -27,7 +27,7 @@ Crowdsourcing starts off for a fresh install. With it enabled, the plugin sends 
 - FATE game IDs and game-defined names, centre, radius, start and observation times, progress, state and observed end or disappearance. Occult Crescent Critical Encounters contribute their game IDs, timers, progress, states and available map marker positions.
 - Recognized coffers, bunnies, pots and carrots with game IDs, locations and any recognized grades.
 - Zone and map IDs, UTC timestamps, current weather, and your current and effective elemental or Knowledge Level where available. Eureka observations can also include whether your elemental level is synced.
-- Recognized English game loot and chain notices contribute the item ID, quantity when available, or chain number. The game notice is read locally to get those numbers and discarded. A visible death does not tell us who got kill credit, and loot is recorded separately.
+- Recognized English game notices contribute an item ID and quantity when available, a chain number, or a signal that you defeated an enemy. The notice text is discarded. The plugin records visible deaths, self-defeat signals and loot separately.
 
 The plugin sends its version, random IDs for visits and enemy tracks, and the API key you enter to authenticate uploads. The key is saved locally in your Dalamud plugin configuration. The server can link uploads made with the same key. Legacy enemy and FATE records retain the existing key reference, and the new observation stream stores a one-way reference to it. The server receives your connection IP as part of normal web traffic.
 

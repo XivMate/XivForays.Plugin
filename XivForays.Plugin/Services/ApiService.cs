@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin;
 using XivMate.DataGathering.Forays.Dalamud.Models;
@@ -18,13 +19,14 @@ public sealed class ApiService(Plugin plugin, IDalamudPluginInterface pluginInte
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private readonly HttpClient httpClient = new(new HttpClientHandler { AllowAutoRedirect = false })
+    private readonly HttpClient httpClient = new(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
     {
         Timeout = TimeSpan.FromSeconds(10)
     };
 
-    private async Task<HttpStatusCode> Post<T>(T body, string endpoint, JsonSerializerOptions? options = null)
+    private async Task<HttpStatusCode> Post<T>(T body, string endpoint, CancellationToken cancellationToken, JsonSerializerOptions? options = null)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var config = plugin.Configuration;
         if (!config.CanCrowdsourceData)
             throw new OperationCanceledException("Crowdsourcing is disabled.");
@@ -43,17 +45,19 @@ public sealed class ApiService(Plugin plugin, IDalamudPluginInterface pluginInte
         request.Headers.Add("X-Api-Key", key.ToString());
         request.Content = JsonContent.Create(body, options: options);
 
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         return response.StatusCode;
     }
 
-    public Task UploadFate(Fate fate) => PostLegacy(fate, "fateended");
+    public Task UploadFate(Fate fate, CancellationToken cancellationToken) =>
+        PostLegacy(fate, "fateended", cancellationToken);
 
-    public Task UploadEnemyPosition(List<EnemyPosition> enemies) => PostLegacy(enemies, "enemyposition");
+    public Task UploadEnemyPosition(List<EnemyPosition> enemies, CancellationToken cancellationToken) =>
+        PostLegacy(enemies, "enemyposition", cancellationToken);
 
-    internal async Task<bool> UploadObservations(ObservationBatch batch)
+    internal async Task<bool> UploadObservations(ObservationBatch batch, CancellationToken cancellationToken)
     {
-        var status = await Post(batch, "observations", ObservationJson);
+        var status = await Post(batch, "observations", cancellationToken, ObservationJson);
         if (status is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed or HttpStatusCode.BadRequest or
             HttpStatusCode.RequestEntityTooLarge or HttpStatusCode.UnprocessableEntity)
             return false;
@@ -62,7 +66,8 @@ public sealed class ApiService(Plugin plugin, IDalamudPluginInterface pluginInte
         return true;
     }
 
-    private async Task PostLegacy<T>(T body, string endpoint) => EnsureAccepted(await Post(body, endpoint));
+    private async Task PostLegacy<T>(T body, string endpoint, CancellationToken cancellationToken) =>
+        EnsureAccepted(await Post(body, endpoint, cancellationToken));
 
     private static void EnsureAccepted(HttpStatusCode status)
     {

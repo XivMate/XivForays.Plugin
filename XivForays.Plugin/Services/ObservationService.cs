@@ -104,7 +104,7 @@ internal sealed class ObservationService(
         }
     }
 
-    private void UploadObservations()
+    private void UploadObservations(CancellationToken cancellationToken)
     {
         if (Interlocked.Exchange(ref uploading, 1) != 0)
             return;
@@ -114,7 +114,7 @@ internal sealed class ObservationService(
             ObservationBatch batch;
             lock (gate)
             {
-                if (!enabled || (retryBatch == null && pending.Count == 0))
+                if (cancellationToken.IsCancellationRequested || !enabled || (retryBatch == null && pending.Count == 0))
                     return;
 
                 if (retryBatch == null)
@@ -131,7 +131,7 @@ internal sealed class ObservationService(
             if (!enabled)
                 return;
 
-            var accepted = api.UploadObservations(batch).GetAwaiter().GetResult();
+            var accepted = api.UploadObservations(batch, cancellationToken).GetAwaiter().GetResult();
             lock (gate)
             {
                 if (ReferenceEquals(retryBatch, batch))
@@ -140,6 +140,10 @@ internal sealed class ObservationService(
 
             if (!accepted)
                 log.Warning("The server rejected or does not support versioned Foray observations.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Disabling sharing or unloading cancels this worker.
         }
         catch (Exception ex)
         {

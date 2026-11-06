@@ -5,15 +5,19 @@ on:
         tags:
             - testing_*
 
+permissions:
+    contents: write
+
 jobs:
     build:
         runs-on: windows-latest
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
+                  persist-credentials: false
             - name: Setup .NET
-              uses: actions/setup-dotnet@v1
+              uses: actions/setup-dotnet@v6
               with:
                   dotnet-version: '10.0.x'
             - name: Restore dependencies
@@ -41,62 +45,8 @@ jobs:
               with:
                   path: |
                       ./XivForays.Plugin/bin/x64/Debug/*
-            - name: Create Release
-              id: create_release
-              uses: actions/create-release@v1
+            - name: Publish testing prerelease
               env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  tag_name: ${{ github.ref }}
-                  release_name: XivForays.Plugin ${{ github.ref }}
-                  draft: false
-                  prerelease: true
-            - name: Upload Release Asset
-              id: upload-release-asset
-              uses: actions/upload-release-asset@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
-                  asset_path: ./XivForays.Plugin.zip
-                  asset_name: XivForays.Plugin.zip
-                  asset_content_type: application/zip
-
-            - name: Commit repo.json
+                  GH_TOKEN: ${{ github.token }}
               run: |
-                  # Configure Git user
-                  git config --global user.name "Actions User"
-                  git config --global user.email "actions@github.com"
-
-                  # Fetch the latest state of the remote master branch
-                  git fetch origin master
-
-                  # Checkout the master branch
-                  git checkout master
-
-                  # Reset the local master branch to exactly match the remote master
-                  # This discards any local commits on master and ensures it's in sync
-                  git reset --hard origin/master
-
-                  # --- Your existing logic to modify repo.json ---
-                  $verT = '${{ github.ref_name }}'
-                  $ver = $verT -replace 'testing_'
-                  $path = './repo.json'
-                  $json = Get-Content -Raw $path | ConvertFrom-Json
-                  $json[0].TestingAssemblyVersion = $ver
-                  $manifest = Get-Content -Raw ./XivForays.Plugin/bin/x64/Debug/XivForays.Plugin.json | ConvertFrom-Json
-                  $json[0].TestingDalamudApiLevel = $manifest.DalamudApiLevel
-                  $json[0].DownloadLinkTesting = $json.DownloadLinkTesting -replace '[^/]+/XivForays.Plugin.zip',"$verT/XivForays.Plugin.zip"
-                  $content = $json | ConvertTo-Json -AsArray
-                  set-content -Path $path -Value $content
-                  # --- End of repo.json modification logic ---
-
-                  # Add the modified file
-                  git add repo.json
-
-                  # Commit the changes (use || true to prevent failure if no changes are made)
-                  git commit -m "[CI] Updating repo.json for ${{ github.ref_name }}" || true
-
-                  # Push the changes to the remote master branch
-                  # This should now be a fast-forward push as the local master is up-to-date
-                  git push origin master
+                  gh release create $env:GITHUB_REF_NAME XivForays.Plugin.zip --verify-tag --prerelease --title "XivForays.Plugin $env:GITHUB_REF_NAME"
