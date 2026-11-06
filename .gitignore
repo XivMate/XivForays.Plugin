@@ -16,3 +16,6 @@ bin/
 /dataSources/
 /dataSources.local.xml
 /.idea/
+
+# Local release dry-run output (docs/RELEASE_CHECKLIST.md)
+/release-dryrun/
