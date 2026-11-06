@@ -1,91 +1,82 @@
-name: Create Release
+name: Publish Friends Release
 
 on:
-    push:
-        tags-ignore:
-            - testing_*
+  push:
+    tags:
+      - 'friends-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: friends-release
+  cancel-in-progress: false
 
 jobs:
-    build:
-        runs-on: windows-latest
-        steps:
-            - uses: actions/checkout@v2
-              with:
-                  submodules: recursive
-            - name: Setup .NET
-              uses: actions/setup-dotnet@v1
-              with:
-                  dotnet-version: '10.0.x'
-            - name: Restore dependencies
-              run: dotnet restore
-            - name: Download Dalamud
-              run: |
-                  Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
-                  Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
-            - name: Build
-              run: |
-                  $ver = '${{ github.ref_name }}'
-                  invoke-expression 'dotnet build --no-restore --configuration Release --nologo -p:Version=$ver -p:FileVersion=$ver -p:AssemblyVersion=$ver'
-            - name: write version into jsons
-              run: |
-                  $ver = '${{ github.ref_name }}'
-                  $path = './XivForays.Plugin/bin/x64/Release/XivForays.Plugin.json'
-                  $json = Get-Content -Raw $path | ConvertFrom-Json
-                  $json.AssemblyVersion = $ver
-                  $content = $json | ConvertTo-Json
-                  set-content -Path $path -Value $content
-            - name: Archive
-              run: Compress-Archive -Path XivForays.Plugin/bin/x64/Release/* -DestinationPath XivForays.Plugin.zip
-            - name: Upload a Build Artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  path: |
-                      ./XivForays.Plugin/bin/x64/Release/*
-            - name: Create Release
-              id: create_release
-              uses: actions/create-release@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  tag_name: ${{ github.ref }}
-                  release_name: XivForays.Plugin ${{ github.ref }}
-                  draft: false
-                  prerelease: false
-            - name: Upload Release Asset
-              id: upload-release-asset
-              uses: actions/upload-release-asset@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
-                  asset_path: ./XivForays.Plugin.zip
-                  asset_name: XivForays.Plugin.zip
-                  asset_content_type: application/zip
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Download stable Dalamud references
+        shell: pwsh
+        run: |
+          $info = Invoke-RestMethod 'https://kamori.goats.dev/Dalamud/Release/VersionInfo'
+          if ([version]$info.assemblyVersion -lt [version]'15.0' -or [version]$info.assemblyVersion -ge [version]'16.0') {
+            throw 'The stable Dalamud distribution must use API 15.'
+          }
+          $zip = Join-Path $env:RUNNER_TEMP 'dalamud.zip'
+          $dalamudPath = Join-Path $env:RUNNER_TEMP 'dalamud'
+          Invoke-WebRequest -Uri $info.downloadUrl -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $dalamudPath
+          "DALAMUD_HOME=$dalamudPath" >> $env:GITHUB_ENV
+      - name: Build and test
+        shell: pwsh
+        run: |
+          dotnet build XivForays.Plugin.sln -c Release -p:Platform=x64 -p:RestoreLockedMode=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test XivForays.Plugin.sln -c Release -p:Platform=x64 --no-build --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prepare package and repository listing
+        shell: pwsh
+        run: |
+          ./.github/scripts/New-FriendsRelease.ps1 -Tag $env:GITHUB_REF_NAME -Repository $env:GITHUB_REPOSITORY `
+            -Package 'XivForays.Plugin/bin/x64/Release/XivForays.Plugin/latest.zip' `
+            -OutputDirectory "$env:RUNNER_TEMP/friends-release"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: friends-release
+          path: ${{ runner.temp }}/friends-release
+          if-no-files-found: error
 
-            - name: Write out repo.json
-              run: |
-                  $ver = '${{ github.ref_name }}'
-                  $path = './repo.json'
-                  $json = Get-Content -Raw $path | ConvertFrom-Json
-                  $json[0].AssemblyVersion = $ver
-                  $json[0].TestingAssemblyVersion = $ver
-                  $manifest = Get-Content -Raw ./XivForays.Plugin/bin/x64/Release/XivForays.Plugin.json | ConvertFrom-Json
-                  $json[0].DalamudApiLevel = $manifest.DalamudApiLevel
-                  $json[0].TestingDalamudApiLevel = $manifest.DalamudApiLevel
-                  $json[0].DownloadLinkInstall = $json.DownloadLinkInstall -replace '[^/]+/XivForays.Plugin.zip',"$ver/XivForays.Plugin.zip"
-                  $json[0].DownloadLinkTesting = $json.DownloadLinkTesting -replace '[^/]+/XivForays.Plugin.zip',"$ver/XivForays.Plugin.zip"
-                  $json[0].DownloadLinkUpdate = $json.DownloadLinkUpdate -replace '[^/]+/XivForays.Plugin.zip',"$ver/XivForays.Plugin.zip"
-                  $content = $json | ConvertTo-Json -AsArray
-                  set-content -Path $path -Value $content
-
-            - name: Commit repo.json
-              run: |
-                  git config --global user.name "Actions User"
-                  git config --global user.email "actions@github.com"
-                  git fetch origin master
-                  git branch -f master ${{ github.sha }}
-                  git checkout master
-                  git add repo.json
-                  git commit -m "[CI] Updating repo.json for ${{ github.ref_name }}" || true
-                  git pull
-                  git push origin master
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: friends-release
+          path: friends-release
+      - name: Publish GitHub release and make it current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if draft=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft); then
+            if [[ "$draft" != true ]]; then
+              echo "This release has already been published."
+              exit 0
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+              --title "XivMate Foray Data Gathering ${GITHUB_REF_NAME#friends-v}" --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            friends-release/XivForays.Plugin.zip friends-release/repo.json
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
