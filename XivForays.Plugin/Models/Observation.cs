@@ -24,6 +24,14 @@ internal enum ObservationKind
     RecordingActive = 14
 }
 
+/// <summary>FATE result on FateEnded: from the end state (Ended/Failed), else from the last progress (100 = success).</summary>
+internal enum FateOutcome : byte
+{
+    Unknown = 0,
+    Success = 1,
+    Failed = 2
+}
+
 internal sealed record Observation
 {
     public ObservationKind Kind { get; init; }
@@ -64,4 +72,13 @@ internal sealed record Observation
 
     /// <summary>Enemy object scale (GameObject.Scale).</summary>
     public float? ModelScale { get; init; }
+
+    /// <summary>FateEnded only: the FATE result (see <see cref="FateOutcome"/>).</summary>
+    public FateOutcome? Outcome { get; init; }
+
+    /// <summary>FateEnded only: true when no Ended/Failed state was seen and the outcome comes from the last progress.</summary>
+    public bool? OutcomeInferred { get; init; }
+
+    /// <summary>FateEnded only: seconds from the FATE start (StartedAt) to this observation.</summary>
+    public uint? DurationSeconds { get; init; }
 }

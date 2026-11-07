@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Numerics;
 using System.Threading;
 using Dalamud.Game.ClientState.Fates;
 using Dalamud.Plugin.Services;
@@ -21,7 +20,9 @@ internal sealed class FateModule(
     ForayService forayService,
     ObservationService observations) : IModule
 {
-    private readonly Dictionary<uint, TrackedFate> fates = new();
+    private readonly FateLifecycle lifecycle = new();
+    // Legacy FATE-end route records (name, level) for the FATEs the lifecycle is tracking.
+    private readonly Dictionary<uint, Models.Fate> legacy = new();
     private const int MaxQueuedFates = 32;
     private readonly UploadPolicy policy = new();
     private ConcurrentQueue<Models.Fate> queue = new();
@@ -29,7 +30,7 @@ internal sealed class FateModule(
     private volatile bool enabled;
 
     public bool Enabled => enabled;
-    public IEnumerable<Models.Fate> ActiveFates => fates.Values.Select(fate => fate.Legacy).ToList();
+    public IEnumerable<Models.Fate> ActiveFates => legacy.Values.ToList();
 
     public void LoadConfig(Configuration.Configuration configuration)
     {
@@ -46,7 +47,8 @@ internal sealed class FateModule(
         {
             scheduler.CancelScheduledTask(FateTick);
             scheduler.CancelScheduledTask(FateUpload);
-            fates.Clear();
+            lifecycle.Clear();
+            legacy.Clear();
             queue = new();
         }
     }
@@ -58,12 +60,17 @@ internal sealed class FateModule(
 
         if (visitId != forayService.VisitId)
         {
-            fates.Clear();
+            // Left the zone/instance: FateDisappeared (not FateEnded) for anything still tracked.
+            lifecycle.LeaveVisit(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), observations.Record);
+            legacy.Clear();
             visitId = forayService.VisitId;
         }
 
         if (objectTable.LocalPlayer == null || !forayService.IsInRecordableTerritory())
+        {
+            lifecycle.Interrupt();
             return;
+        }
 
         try
         {
@@ -77,85 +84,56 @@ internal sealed class FateModule(
 
     private void SampleFates(Observation context)
     {
-        var visible = new HashSet<uint>();
+        var snapshots = new List<FateSnapshot>();
+        var byId = new Dictionary<uint, IFate>();
         foreach (var fate in fateTable)
         {
             if (fate.TerritoryType.RowId != context.TerritoryId)
                 continue;
 
-            var id = fate.FateId;
-            visible.Add(id);
-            fates.TryGetValue(id, out var tracked);
-            if (tracked != null && fate.State is (FateState.Ended or FateState.Failed))
-            {
-                Finish(tracked with { State = fate.State, Progress = fate.Progress }, context, ObservationKind.FateEnded);
-                continue;
-            }
-
-            if (fate.State != FateState.Running || fate.StartTimeEpoch <= 0 || fate.Position == Vector3.Zero)
-                continue;
-
-            if (tracked != null && tracked.Legacy.StartedAt != fate.StartTimeEpoch)
-            {
-                Finish(tracked, context, ObservationKind.FateDisappeared);
-                tracked = null;
-            }
-
-            if (tracked == null)
-            {
-                var legacy = new Models.Fate
-                {
-                    FateId = id,
-                    Name = fate.Name.TextValue,
-                    X = fate.Position.X,
-                    Y = fate.Position.Y,
-                    Z = fate.Position.Z,
-                    Radius = fate.Radius,
-                    StartedAt = fate.StartTimeEpoch,
-                    InstanceId = context.VisitId,
-                    TerritoryId = (int)context.TerritoryId,
-                    MapId = (int)context.MapId,
-                    LevelId = fate.Level
-                };
-                var started = new TrackedFate(legacy, fate.State, fate.Progress, fate.Position, fate.Radius);
-                fates[id] = started;
-                Record(started, context, ObservationKind.FateStarted);
-            }
-            else if (tracked.Progress != fate.Progress || tracked.Position != fate.Position || tracked.Radius != fate.Radius)
-            {
-                var updated = tracked with { Progress = fate.Progress, Position = fate.Position, Radius = fate.Radius };
-                fates[id] = updated;
-                Record(updated, context, ObservationKind.FateUpdated);
-            }
+            byId[fate.FateId] = fate;
+            snapshots.Add(new FateSnapshot(fate.FateId, (byte)fate.State, fate.Progress, fate.StartTimeEpoch,
+                fate.Position.X, fate.Position.Y, fate.Position.Z, fate.Radius));
         }
 
-        foreach (var id in fates.Keys.Where(id => !visible.Contains(id)).ToList())
-            Finish(fates[id], context, ObservationKind.FateDisappeared);
+        lifecycle.Sample(context, snapshots, observation =>
+        {
+            observations.Record(observation);
+            var id = observation.GameId ?? 0;
+            switch (observation.Kind)
+            {
+                case ObservationKind.FateStarted when byId.TryGetValue(id, out var fate):
+                    legacy[id] = NewLegacy(fate, context);
+                    break;
+                case ObservationKind.FateEnded or ObservationKind.FateDisappeared when legacy.Remove(id, out var done):
+                    QueueLegacy(done, context);
+                    break;
+            }
+        });
     }
 
-    private void Finish(TrackedFate fate, Observation context, ObservationKind kind)
+    private static Models.Fate NewLegacy(IFate fate, Observation context) => new()
     {
-        fates.Remove(fate.Legacy.FateId);
-        Record(fate, context, kind);
-        fate.Legacy.EndedAt = context.ObservedAtMs / 1000;
+        FateId = fate.FateId,
+        Name = fate.Name.TextValue,
+        X = fate.Position.X,
+        Y = fate.Position.Y,
+        Z = fate.Position.Z,
+        Radius = fate.Radius,
+        StartedAt = fate.StartTimeEpoch,
+        InstanceId = context.VisitId,
+        TerritoryId = (int)context.TerritoryId,
+        MapId = (int)context.MapId,
+        LevelId = fate.Level
+    };
+
+    private void QueueLegacy(Models.Fate fate, Observation context)
+    {
+        fate.EndedAt = context.ObservedAtMs / 1000;
         if (queue.Count >= MaxQueuedFates)
             queue.TryDequeue(out _);
-        queue.Enqueue(fate.Legacy);
+        queue.Enqueue(fate);
     }
-
-    private void Record(TrackedFate fate, Observation context, ObservationKind kind) =>
-        observations.Record(context with
-        {
-            Kind = kind,
-            GameId = fate.Legacy.FateId,
-            X = fate.Position.X,
-            Y = fate.Position.Y,
-            Z = fate.Position.Z,
-            Radius = fate.Radius,
-            StartedAt = fate.Legacy.StartedAt,
-            Progress = fate.Progress,
-            State = (byte)fate.State
-        });
 
     private void FateUpload(CancellationToken cancellationToken)
     {
@@ -186,5 +164,4 @@ internal sealed class FateModule(
 
     public void Dispose() => LoadConfig(new Configuration.Configuration());
 
-    private sealed record TrackedFate(Models.Fate Legacy, FateState State, byte Progress, Vector3 Position, float Radius);
 }
