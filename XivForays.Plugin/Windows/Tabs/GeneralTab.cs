@@ -34,6 +34,6 @@ internal class GeneralTab(
         }
 
         var fateCount = fateModule.ActiveFates.Count();
-        ImGui.TextUnformatted($"Fates on map: {fateCount}##fatecount");
+        ImGui.TextUnformatted($"Fates on map: {fateCount}");
     }
 }

@@ -13,7 +13,8 @@ using XivMate.DataGathering.Forays.Dalamud.Models;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Services;
 
-public sealed class EnemyTrackingService(IObjectTable objectTable, IDataManager dataManager, ForayService forayService)
+public sealed class EnemyTrackingService(
+    IObjectTable objectTable, IDataManager dataManager, ForayService forayService, IClientState clientState)
 {
     private readonly Lazy<HashSet<uint>> adaptationIds = new(() => FindStatuses(dataManager, "Adaptation", "Adaption"));
     private readonly Lazy<HashSet<uint>> mutationIds = new(() => FindStatuses(dataManager, "Mutation"));
@@ -30,10 +31,13 @@ public sealed class EnemyTrackingService(IObjectTable objectTable, IDataManager 
         if (!IsInRecordableTerritory())
             return positions;
 
+        // Debug view only: the same territory/map the upload context (ObservationService.GetContext) uses.
+        var territory = (uint)clientState.TerritoryType;
+        var map = clientState.MapId;
         foreach (var enemy in objectTable.OfType<IBattleNpc>())
         {
             if (IsEnemy(enemy) && enemy.CurrentHp > 0)
-                positions[enemy.GameObjectId] = Read(enemy, Guid.Empty, 0, 0,
+                positions[enemy.GameObjectId] = Read(enemy, forayService.VisitId, territory, map,
                     DateTimeOffset.UtcNow.ToUnixTimeSeconds(), null).Position;
         }
 
