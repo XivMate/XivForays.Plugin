@@ -47,6 +47,7 @@ public class PlayerContextTests
         Assert.Equal(ContextRules.DeadBit, ContextRules.Diff(a, a with { Dead = true }));
         Assert.Equal(ContextRules.JobBit, ContextRules.Diff(a, a with { ClassJobId = 20 }));
         Assert.Equal(ContextRules.InstanceBit, ContextRules.Diff(a, a with { InstanceStartTs = 1794140000 }));
+        Assert.Equal(ContextRules.InstanceBit, ContextRules.Diff(a with { CurrentWorldId = 33 }, a with { CurrentWorldId = 34 }));
         Assert.Equal(ContextRules.CombatBit, ContextRules.Diff(a, a with { InCombat = true }));
         Assert.Equal(ContextRules.EurekaBit, ContextRules.Diff(a, a with { Eureka = a.Eureka! with { MaxElementalLevel = 59 } }));
 
@@ -87,7 +88,8 @@ public class PlayerContextTests
         var record = new Observation
         {
             Kind = ObservationKind.PlayerContext, ObservedAtMs = 1794139827000, VisitId = Guid.NewGuid(), TerritoryId = 827,
-            MapId = 520, PlayerElementalLevel = 60, PlayerEffectiveElementalLevel = 60, Situation = Sample() with { Reason = 2, Changed = 8 }
+            MapId = 520, PlayerElementalLevel = 60, PlayerEffectiveElementalLevel = 60,
+            Situation = Sample() with { Reason = 2, Changed = 8, CurrentWorldId = 33 }
         };
         var json = JsonSerializer.Serialize(new ObservationBatch(1, Guid.NewGuid(), [record]), ObservationJson.Options);
         using var document = JsonDocument.Parse(json);
@@ -98,6 +100,7 @@ public class PlayerContextTests
         Assert.Equal(1, situation.GetProperty("situationVersion").GetInt32());
         Assert.Equal(ContextRules.CaptureRevision, situation.GetProperty("captureRevision").GetInt32());
         Assert.Equal(6, situation.GetProperty("eureka").GetProperty("board").GetArrayLength());
+        Assert.Equal(33u, situation.GetProperty("currentWorldId").GetUInt32());
         Walk(item, null);
         foreach (var banned in new[] { "name", "contentId", "objectId", "entityId", "world", "homeWorld" })
             Assert.DoesNotContain("\"" + banned, json, StringComparison.OrdinalIgnoreCase);

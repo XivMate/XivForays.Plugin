@@ -199,6 +199,7 @@ public sealed class PlayerContextSampler(IObjectTable objectTable, IPartyList pa
             InstanceStartTs = instanceStart,
             DirectorRowId = directorRow,
             PublicInstanceId = publicInstance,
+            CurrentWorldId = local.CurrentWorld.RowId == 0 ? null : local.CurrentWorld.RowId,
             ClassJobId = state->CurrentClassJobId,
             Level = state->CurrentLevel,
             SyncedLevel = state->SyncedLevel,

@@ -32,6 +32,9 @@ internal sealed record PlayerContext
     /// <summary>UIState.PublicInstance.InstanceId (numbered instances; 0 is sent as null).</summary>
     public uint? PublicInstanceId { get; init; }
 
+    /// <summary>The local player's own current world (World row id), for instance matching. Never another player's.</summary>
+    public uint? CurrentWorldId { get; init; }
+
     public byte ClassJobId { get; init; }
     public short Level { get; init; }
     public short SyncedLevel { get; init; }

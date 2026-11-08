@@ -1,5 +1,7 @@
 # Matching capturers in the same Eureka instance
 
+Not a release blocker: two friends reporting the same spawn are two independent confirmations, which is wanted.
+
 ## What the client exposes
 
 There is no readable per-instance id in Eureka:
@@ -11,13 +13,14 @@ There is no readable per-instance id in Eureka:
 - The server instance number is not sent to the client.
 
 Kind 19 still records all three raw (`instanceStartTs`, `directorRowId`, `publicInstanceId`) in case a patch fills
-them in.
+them in, plus `currentWorldId` (the local player's own current world). Two visits can only share an instance when
+they are on the same world, so `currentWorldId` + `territoryId` narrows the candidates before the rule below.
 
 ## Offline rule (exporter)
 
 Two visits (`visitId`, different API keys) are the same instance when all hold:
 
-1. Same `territoryId`, and their time ranges (first to last record) overlap.
+1. Same `territoryId` and the same `currentWorldId` (kind 19), and their time ranges (first to last record) overlap.
 2. At least one **server-timed event** matches: a FATE with the same id and the same `startedAt` (kinds 5-8; `startedAt`
    is the server's start second, so different instances practically never share it), or a critical engagement with
    the same id and `startedAt` (kind 12, Bozja / Zadnor / Occult Crescent).

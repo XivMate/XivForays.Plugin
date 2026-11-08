@@ -53,7 +53,8 @@ internal static class ContextRules
             bits |= StatusBit;
         if (a.Dead != b.Dead)
             bits |= DeadBit;
-        if (a.InstanceStartTs != b.InstanceStartTs || a.PublicInstanceId != b.PublicInstanceId || a.DirectorRowId != b.DirectorRowId)
+        if (a.InstanceStartTs != b.InstanceStartTs || a.PublicInstanceId != b.PublicInstanceId || a.DirectorRowId != b.DirectorRowId ||
+            a.CurrentWorldId != b.CurrentWorldId)
             bits |= InstanceBit;
         if (a.Occult?.SupportJob != b.Occult?.SupportJob || !Same(a.Occult?.SupportJobLevels, b.Occult?.SupportJobLevels) ||
             a.Occult?.KnowledgeLevelSync != b.Occult?.KnowledgeLevelSync)

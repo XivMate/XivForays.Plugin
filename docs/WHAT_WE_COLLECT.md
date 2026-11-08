@@ -14,7 +14,7 @@ Zadnor, Delubrum and Occult Crescent. Outside those zones it does nothing.
   the chain timer, whether you are dead or mounted, and a short list of foray buffs (sprint, sneak, logos/lost/phantom
   actions, food, raise/weakness).
 - **Your group, as numbers only:** how many are in your party, and each member's job, level and role.
-- **Context:** zone, weather, game version, plugin version and times.
+- **Context:** zone, the world (server) you are on, weather, game version, plugin version and times.
 
 ## What it never sends
 

@@ -25,7 +25,8 @@ public class PayloadPrivacyTests
     };
 
     // Game data ids whose names contain a personal fragment but are not personal: a BNpcName row and a nameplate icon.
-    private static readonly string[] AllowedNames = ["chainnumber", "nameid", "nameplateiconid"];
+    // currentworldid: the local player's OWN current world (kind 19, instance matching); no other player's world is sent.
+    private static readonly string[] AllowedNames = ["chainnumber", "nameid", "nameplateiconid", "currentworldid"];
 
     [Theory]
     [InlineData(typeof(Observation))]
