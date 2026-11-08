@@ -21,7 +21,33 @@ internal sealed record EnemyPose
     public bool PresentAtStart { get; init; }
     public bool SeenSpawning { get; init; }
     public float PlayerDistance { get; init; }
+    /// <summary>Player within PoseRates.NearYalms (90 y since the 11:20 trial): the ground is loaded.</summary>
     public bool CollisionLoaded { get; init; }
+
+    /// <summary>The skeleton tilt is trusted (same 90 y rule; a pose beyond it may read tilt 0 on a slope).</summary>
+    public bool TiltTrusted { get; init; }
+
+    /// <summary>The one upgrade re-take of this spawn instance (the first pose was untrusted).</summary>
+    public bool Retake { get; init; }
+
+    /// <summary>Where the instance was when first seen [x, y, z] (item 3: is DefaultPosition the spawn point?).</summary>
+    public float[]? FirstSeenPosition { get; init; }
+
+    /// <summary>Distance from the pose position to DefaultPosition (the home).</summary>
+    public float? HomeDistance { get; init; }
+
+    /// <summary>
+    /// Distance from the first-seen position to DefaultPosition. About 0 for every instance, including ones that
+    /// entered view walking, would mean DefaultPosition is the position at object creation, not a leash home.
+    /// </summary>
+    public float? FirstSeenHomeDistance { get; init; }
+
+    /// <summary>Distance from the first-seen position to the pose position (wandered before settling).</summary>
+    public float? FirstSeenMoved { get; init; }
+
+    /// <summary>Milliseconds from first seen to this read.</summary>
+    public long SeenForMs { get; init; }
+
     public float HitboxRadius { get; init; }
 
     /// <summary>GameObject.Position [x, y, z] (networked, interpolated).</summary>

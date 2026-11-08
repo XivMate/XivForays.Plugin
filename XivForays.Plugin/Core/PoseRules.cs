@@ -20,8 +20,12 @@ internal static class PoseRates
     public const float StillYalms = 0.05f;
     public const float StillDegrees = 1f;
 
-    /// <summary>Within this distance of the player the collision is treated as loaded ("near").</summary>
-    public const float NearYalms = 120f;
+    /// <summary>
+    /// Within this distance of the player the skeleton tilt is trusted (collisionLoaded / tiltTrusted). Trial
+    /// 2026-11-08 11:20 (Squib 8174, Anemos): tilts at 68-76 y were real (12.7, 13.5 degrees on a slope) but poses at
+    /// 101-117 y on slopes read 0, so the game does not settle at 120 y. 90 y keeps a margin under 101.
+    /// </summary>
+    public const float NearYalms = 90f;
 
     public const long FormDebounceMs = 1500;
     public const long FormMaxWaitMs = 5000;
@@ -222,6 +226,57 @@ internal sealed class SpawnPoseState
             RetakeDone = true;
         }
     }
+}
+
+internal enum LayoutDecision
+{
+    /// <summary>No pose yet for this spawn instance: record it.</summary>
+    Record,
+
+    /// <summary>Only an untrusted (far) pose so far and this one is trusted: record it once as the upgrade re-take.</summary>
+    Upgrade,
+
+    /// <summary>Already covered: a trusted pose, or an untrusted one and this is untrusted too (or the upgrade was used).</summary>
+    Skip
+}
+
+/// <summary>
+/// Trial fix 2026-11-08-1126 item 2: ONE spawn pose per (layoutId, spawn instance) per visit, whatever the tracks do
+/// (walking out of range and back makes new tracks). At most one upgrade re-take when the first was untrusted. A
+/// death of that layout ends the instance, so its respawn gets a new pose. Layout 0 falls back to the content key.
+/// </summary>
+internal sealed class LayoutPoseRegistry
+{
+    private readonly Dictionary<uint, (bool Trusted, bool Upgraded)> layouts = new();
+    private readonly int max;
+
+    public LayoutPoseRegistry(int max = PoseRates.DedupeMax) => this.max = max;
+
+    public int Count => layouts.Count;
+
+    public void Clear() => layouts.Clear();
+
+    /// <summary>Decides and, unless skipped, records the pose for this layout.</summary>
+    public LayoutDecision TryRecord(uint layoutId, bool trusted)
+    {
+        if (layoutId == 0)
+            return LayoutDecision.Record;
+        if (!layouts.TryGetValue(layoutId, out var state))
+        {
+            if (layouts.Count >= max)
+                layouts.Clear();
+            layouts[layoutId] = (trusted, false);
+            return LayoutDecision.Record;
+        }
+
+        if (state.Trusted || state.Upgraded || !trusted)
+            return LayoutDecision.Skip;
+        layouts[layoutId] = (true, true);
+        return LayoutDecision.Upgrade;
+    }
+
+    /// <summary>The instance at this layout died: its respawn is a new instance.</summary>
+    public void Died(uint layoutId) => layouts.Remove(layoutId);
 }
 
 /// <summary>Content key per visit (design §3 "Dedupe" b): the same idle mob re-entering view is not recorded again.</summary>
@@ -628,9 +683,10 @@ internal static class PoseLog
             case ObservationKind.EnemySpawnPose when o.Pose is { } p:
                 var dy = p.DrawPosition is { Length: 3 } d && p.Position.Length == 3 ? d[1] - p.Position[1] : 0;
                 return string.Format(inv,
-                    "pose 15 bnpc {0} layout {1} near {2} tilt {3:0.0} dy {4:0.000} form {5} start {6} spawning {7} home {8} fate {9} dist {10:0.0}",
+                    "pose 15 bnpc {0} layout {1} near {2} tilt {3:0.0} dy {4:0.000} form {5} start {6} spawning {7} home {8} fate {9} dist {10:0.0} retake {11} homeDist {12:0.00} firstHome {13:0.00} firstMoved {14:0.00} seenFor {15:0.0}",
                     p.BnpcId, layout, p.CollisionLoaded ? 1 : 0, p.SkeletonTilt ?? 0, dy, p.Form, p.PresentAtStart ? 1 : 0,
-                    p.SeenSpawning ? 1 : 0, p.HomePosition == null ? 0 : 1, p.FateId ?? 0, p.PlayerDistance);
+                    p.SeenSpawning ? 1 : 0, p.HomePosition == null ? 0 : 1, p.FateId ?? 0, p.PlayerDistance, p.Retake ? 1 : 0,
+                    p.HomeDistance ?? -1, p.FirstSeenHomeDistance ?? -1, p.FirstSeenMoved ?? -1, p.SeenForMs / 1000.0);
             case ObservationKind.EnemyFormChange when o.FormChange is { } f:
                 return string.Format(inv, "pose 16 bnpc {0} layout {1} changed 0x{2:X2} dy {3:0.000} offset {4:0.000} settled {5} before {6}",
                     o.GameId ?? 0, layout, f.Changed, f.DrawHeightDelta ?? 0, f.DrawOffsetDelta ?? 0, f.AfterSettled ? 1 : 0,

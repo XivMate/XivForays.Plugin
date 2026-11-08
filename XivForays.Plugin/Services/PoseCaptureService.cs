@@ -37,6 +37,7 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
     private readonly HashSet<ulong> seenThisScan = new();
     private readonly CategoryResolver categories = new();
     private readonly PoseDedupe dedupe = new();
+    private readonly LayoutPoseRegistry layoutPoses = new();
     private readonly AggroCorrelator aggro = new();
     private readonly RespawnMatcher respawns = new();
     private readonly PlayerHistory playerHistory = new();
@@ -53,7 +54,7 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
     public bool CapturePass { get; set; }
 
     internal int TrackedCount => tracks.Count;
-    internal int DedupeCount => dedupe.Count;
+    internal int DedupeCount => dedupe.Count + layoutPoses.Count;
     internal int PendingDeaths => respawns.PendingCount;
     internal int CountOf(ObservationKind kind) => (int)kind < countsByKind.Length ? countsByKind[(int)kind] : 0;
     internal int RespawnCount { get; private set; }
@@ -77,6 +78,7 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
             track.Npc = null;
         tracks.Clear();
         dedupe.Clear();
+        layoutPoses.Clear();
         aggro.Clear();
         respawns.Clear();
         playerHistory.Clear();
@@ -126,6 +128,7 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
         tracks.TryGetValue(enemy.GameObjectId, out var track);
         var anchorPoint = track?.Spawn.SettledPosition is { } settled && track.Home == null ? settled : anchor;
         respawns.Died(trackId, enemy.BaseId, layoutId, anchorPoint, form, nowMs, player);
+        layoutPoses.Died(layoutId);
         var native = (NativeCharacter*)enemy.Address;
         return ((byte)Category(native->CombatTaggerId), native->CombatTagType, track?.LastTargetCategory ?? 0);
     }
@@ -144,7 +147,7 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
         if (track == null || track.TrackId != trackId)
         {
             var old = track;
-            track = new PoseTrack(trackId, nowMs, Vector3.Distance(position, player));
+            track = new PoseTrack(trackId, nowMs, Vector3.Distance(position, player)) { FirstSeenPosition = position };
             track.PresentAtStart = PlayerHistory.PresentAtStart(nowMs, visitScanStartMs);
             track.SeenSpawning = PlayerHistory.SeenSpawning(track.PresentAtStart, track.FirstSeenDistance,
                 playerHistory.StoodWithin(position, PoseRates.SpawningYalms, nowMs));
@@ -280,12 +283,26 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
     private void TakeSpawnPose(PoseTrack track, EnemyPose pose, PoseTake take, Observation context, Action<Observation> record)
     {
         track.Spawn.Taken(take, track.PlayerDistance);
-        var key = PoseKey.Of(pose.BnpcId, pose.ModelCharaId, pose.Form, track.Position.X, track.Position.Z, track.Heading,
-            pose.CollisionLoaded);
-        if (!dedupe.TryAdd(key))
-            return;
+        bool retake;
+        if (track.LayoutId != 0)
+        {
+            // One pose per (layoutId, spawn instance), plus one upgrade when the first was untrusted.
+            var decision = layoutPoses.TryRecord(track.LayoutId, pose.TiltTrusted);
+            if (decision == LayoutDecision.Skip)
+                return;
+            retake = decision == LayoutDecision.Upgrade;
+        }
+        else
+        {
+            var key = PoseKey.Of(pose.BnpcId, pose.ModelCharaId, pose.Form, track.Position.X, track.Position.Z, track.Heading,
+                pose.CollisionLoaded);
+            if (!dedupe.TryAdd(key))
+                return;
+            retake = take == PoseTake.NearRetake;
+        }
+
         track.Spawn.SettledPosition ??= track.Position;
-        Emit(Enemy(context, track, ObservationKind.EnemySpawnPose) with { Pose = pose, FateId = pose.FateId }, record);
+        Emit(Enemy(context, track, ObservationKind.EnemySpawnPose) with { Pose = pose with { Retake = retake }, FateId = pose.FateId }, record);
         if (CapturePass && take == PoseTake.First && track.Idle == null && !track.IdleDone && track.Npc != null)
         {
             track.Idle = new IdleTrackBuilder(nowMs, track.Position, track.Heading, pose.BaseTimeline, pose.BaseOverride);
@@ -526,6 +543,8 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
         var eventId = go->EventId.Id;
         var position = (Vector3)go->Position;
         var distance = Vector3.Distance(position, player);
+        var near = distance <= PoseRates.NearYalms;
+        Vector3? homePoint = home == Vector3.Zero ? null : home;
         return new EnemyPose
         {
             BnpcId = go->BaseId,
@@ -536,7 +555,13 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
             PresentAtStart = track.PresentAtStart,
             SeenSpawning = track.SeenSpawning,
             PlayerDistance = PoseMath.R2(distance),
-            CollisionLoaded = distance <= PoseRates.NearYalms,
+            CollisionLoaded = near,
+            TiltTrusted = near,
+            FirstSeenPosition = PoseMath.Vec(track.FirstSeenPosition),
+            HomeDistance = homePoint is { } hp ? PoseMath.R2(Vector3.Distance(hp, position)) : null,
+            FirstSeenHomeDistance = homePoint is { } hf ? PoseMath.R2(Vector3.Distance(hf, track.FirstSeenPosition)) : null,
+            FirstSeenMoved = PoseMath.R2(Vector3.Distance(track.FirstSeenPosition, position)),
+            SeenForMs = nowMs - track.Settle.FirstSeenMs,
             HitboxRadius = PoseMath.R3(go->HitboxRadius),
             Position = PoseMath.Vec(position),
             Rotation = PoseMath.R4(go->Rotation),
@@ -726,6 +751,7 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
     {
         public Guid TrackId { get; } = trackId;
         public float FirstSeenDistance { get; } = firstSeenDistance;
+        public Vector3 FirstSeenPosition { get; init; }
         public SettleState Settle { get; } = new(firstSeenMs);
         public SpawnPoseState Spawn { get; } = new();
         public FormWatch Form { get; } = new();

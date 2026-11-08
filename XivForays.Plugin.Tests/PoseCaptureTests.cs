@@ -87,8 +87,9 @@ public class PoseCaptureTests
         far.Taken(far.Decide(true, 150), 150);
         Assert.True(far.FirstWasFar);
         Assert.Equal(PoseTake.None, far.Decide(true, 130)); // still far
-        Assert.Equal(PoseTake.NearRetake, far.Decide(true, 100));
-        far.Taken(PoseTake.NearRetake, 100);
+        Assert.Equal(PoseTake.None, far.Decide(true, 100)); // 100 y is untrusted since the 11:20 trial
+        Assert.Equal(PoseTake.NearRetake, far.Decide(true, 85));
+        far.Taken(PoseTake.NearRetake, 85);
         Assert.Equal(PoseTake.None, far.Decide(true, 50));
     }
 
@@ -125,6 +126,55 @@ public class PoseCaptureTests
             Assert.True(dedupe.TryAdd(PoseKey.Of(1, 1, 0, i, 0, 0, true)));
         Assert.True(dedupe.TryAdd(PoseKey.Of(1, 1, 0, 99, 0, 0, true)));
         Assert.Equal(1, dedupe.Count);
+    }
+
+    // ---- trial 11:20 fixes: trust radius and one pose per (layoutId, spawn instance) ----
+
+    [Fact]
+    public void TiltIsTrustedOnlyWithinNinetyYalms()
+    {
+        Assert.Equal(90f, PoseRates.NearYalms);
+        var state = new SpawnPoseState();
+        state.Taken(state.Decide(true, 101), 101); // the trial's 101-117 y poses read tilt 0 on slopes
+        Assert.True(state.FirstWasFar);
+        Assert.Equal(PoseTake.NearRetake, state.Decide(true, 76));
+    }
+
+    [Fact]
+    public void OnePosePerLayoutInstanceAcrossTracksWithOneUpgrade()
+    {
+        var layouts = new LayoutPoseRegistry();
+        // Walking out of range and back makes new tracks of the same instance (7269591 x3 in the trial).
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7269591, trusted: false)); // first seen at 110 y
+        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, trusted: false)); // back, still far
+        Assert.Equal(LayoutDecision.Upgrade, layouts.TryRecord(7269591, trusted: true)); // came within 90 y
+        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, trusted: true)); // one upgrade only
+        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, trusted: false));
+
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7083308, trusted: true)); // trusted first: done
+        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7083308, trusted: true));
+
+        // A death of the layout ends the instance: the respawn gets a new pose.
+        layouts.Died(7083308);
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7083308, trusted: true));
+        layouts.Died(7269591);
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7269591, trusted: false));
+        Assert.Equal(LayoutDecision.Upgrade, layouts.TryRecord(7269591, trusted: true));
+
+        // Layout 0 is not a key: the content dedupe decides.
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(0, true));
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(0, true));
+        Assert.Equal(2, layouts.Count);
+    }
+
+    [Fact]
+    public void LayoutRegistryIsBounded()
+    {
+        var layouts = new LayoutPoseRegistry(max: 2);
+        layouts.TryRecord(1, true);
+        layouts.TryRecord(2, true);
+        layouts.TryRecord(3, true);
+        Assert.Equal(1, layouts.Count);
     }
 
     // ---- form change debounce ----
@@ -435,7 +485,8 @@ public class PoseCaptureTests
         SkeletonRotation = [0.0712f, 0.5788f, -0.0123f, 0.8121f], SkeletonPitch = -9.87f, SkeletonYaw = 70.9f,
         SkeletonRoll = 0.43f, SkeletonTilt = 9.9f, ModelCharaId = 1234, Skeleton = [109, 123, 1], CustomizeHash = 123456789012345,
         BaseTimeline = 3, OverallSpeed = 1, Timelines = [[0, 3, 1]], AnimTime = [1.234f, 2.4f], HomePosition = [-123.4f, 12.3f, 456.7f],
-        HomeRotation = 1.2f, FateId = 1367, Hp = 100, MaxHp = 100, Claim = (byte)ObjectCategory.Self, Statuses = [[1234, 1, 300, 6]]
+        HomeRotation = 1.2f, FateId = 1367, TiltTrusted = true, HomeDistance = 0.16f, FirstSeenHomeDistance = 0.1f,
+        FirstSeenMoved = 0.25f, SeenForMs = 2100, FirstSeenPosition = [-123.4f, 12.3f, 456.8f], Hp = 100, MaxHp = 100, Claim = (byte)ObjectCategory.Self, Statuses = [[1234, 1, 300, 6]]
     };
 
     private static IEnumerable<Observation> SampleRecords()
@@ -540,7 +591,8 @@ public class PoseCaptureTests
     public void SpawnPoseLogLineIsNameFree()
     {
         var line = PoseLog.Line(SampleRecords().First());
-        Assert.Equal("pose 15 bnpc 7777 layout 4012345 near 1 tilt 9.9 dy -0.358 form 0 start 0 spawning 1 home 1 fate 1367 dist 43.2", line);
+        Assert.Equal("pose 15 bnpc 7777 layout 4012345 near 1 tilt 9.9 dy -0.358 form 0 start 0 spawning 1 home 1 fate 1367 dist 43.2 " +
+                     "retake 0 homeDist 0.16 firstHome 0.10 firstMoved 0.25 seenFor 2.1", line);
         foreach (var record in SampleRecords())
             Assert.Matches("^pose [A-Za-z0-9 .:-]+$", PoseLog.Line(record));
     }
