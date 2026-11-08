@@ -18,9 +18,8 @@ internal sealed class ObservationService(
     IPluginLog log) : IModule
 {
     private readonly object gate = new();
-    private readonly Queue<Observation> pending = new();
+    private readonly ObservationBatcher batcher = new();
     private readonly UploadPolicy policy = new();
-    private ObservationBatch? retryBatch;
     private int uploading;
     private volatile bool enabled;
     private UploadOutcome? lastWarned;
@@ -36,10 +35,7 @@ internal sealed class ObservationService(
         {
             enabled = configuration.CanCrowdsourceData;
             if (!enabled)
-            {
-                pending.Clear();
-                retryBatch = null;
-            }
+                batcher.Clear();
         }
 
         if (enabled)
@@ -99,9 +95,7 @@ internal sealed class ObservationService(
             if (!enabled)
                 return;
 
-            if (pending.Count >= UploadPolicy.MaxPending)
-                pending.Dequeue();
-            pending.Enqueue(observation);
+            batcher.Enqueue(observation);
         }
     }
 
@@ -112,22 +106,17 @@ internal sealed class ObservationService(
 
         try
         {
-            ObservationBatch batch;
+            ObservationBatch? batch;
             lock (gate)
             {
-                if (cancellationToken.IsCancellationRequested || !enabled || (retryBatch == null && pending.Count == 0) ||
+                if (cancellationToken.IsCancellationRequested || !enabled || !batcher.HasWork ||
                     !policy.CanAttempt(Environment.TickCount64))
                     return;
 
-                if (retryBatch == null)
-                {
-                    var observations = new Observation[Math.Min(UploadPolicy.MaxBatchSize, pending.Count)];
-                    for (var i = 0; i < observations.Length; i++)
-                        observations[i] = pending.Dequeue();
-                    retryBatch = new ObservationBatch(1, Guid.NewGuid(), observations);
-                }
-
-                batch = retryBatch;
+                // At most 256 records and 400 KB serialized per batch; a 413 splits it (see ObservationBatcher).
+                batch = batcher.Next();
+                if (batch == null)
+                    return;
             }
 
             if (!enabled)
@@ -136,10 +125,7 @@ internal sealed class ObservationService(
             var outcome = api.UploadObservations(batch, cancellationToken).GetAwaiter().GetResult();
             var keep = policy.Record(outcome, Environment.TickCount64);
             lock (gate)
-            {
-                if (!keep && ReferenceEquals(retryBatch, batch))
-                    retryBatch = null;
-            }
+                batcher.Complete(batch, outcome, keep);
 
             Report(outcome);
         }
@@ -163,6 +149,14 @@ internal sealed class ObservationService(
         if (outcome == UploadOutcome.Accepted)
         {
             lastWarned = null;
+            return;
+        }
+
+        if (outcome == UploadOutcome.TooLarge)
+        {
+            if (lastWarned != outcome)
+                log.Warning("XivForays: the server refused an observation batch as too large (413); it is split and resent.");
+            lastWarned = outcome;
             return;
         }
 

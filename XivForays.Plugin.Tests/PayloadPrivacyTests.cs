@@ -24,24 +24,48 @@ public class PayloadPrivacyTests
         PlayerElementalSynced = false
     };
 
+    // Game data ids whose names contain a personal fragment but are not personal: a BNpcName row and a nameplate icon.
+    private static readonly string[] AllowedNames = ["chainnumber", "nameid", "nameplateiconid"];
+
     [Theory]
     [InlineData(typeof(Observation))]
     [InlineData(typeof(ObservationBatch))]
-    public void UploadTypesHaveNoTextFields(Type type)
+    [InlineData(typeof(EnemyPose))]
+    [InlineData(typeof(EnemyFormChange))]
+    [InlineData(typeof(EnemyIdleTrack))]
+    [InlineData(typeof(EnemyAggro))]
+    [InlineData(typeof(AggroPlayer))]
+    [InlineData(typeof(AggroLink))]
+    [InlineData(typeof(EnemyRespawn))]
+    public void UploadTypesHaveNoTextFields(Type type) => AssertNoTextFields(type, new HashSet<Type>());
+
+    // Walks the upload type and every nested record: only numbers, bools, enums, Guids (random track/visit ids) and
+    // arrays of those or of nested upload records. No strings anywhere, no personal field names.
+    private static void AssertNoTextFields(Type type, HashSet<Type> seen)
     {
+        if (!seen.Add(type))
+            return;
         foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             var t = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            while (t.IsArray)
+                t = t.GetElementType()!;
             Assert.NotEqual(typeof(string), t);
             Assert.NotEqual(typeof(char), t);
             Assert.NotEqual(typeof(object), t);
-            Assert.True(t.IsPrimitive || t.IsEnum || t == typeof(Guid) || t == typeof(Observation[]),
+            var nested = t.Namespace == typeof(Observation).Namespace && t.IsClass;
+            Assert.True(t.IsPrimitive || t.IsEnum || t == typeof(Guid) || nested,
                 $"{type.Name}.{property.Name} has unexpected type {t.Name}");
+            if (nested)
+                AssertNoTextFields(t, seen);
 
             var name = property.Name.ToLowerInvariant();
-            if (name is "chainnumber")
-                continue; // A game EXP chain counter, not personal data.
+            if (AllowedNames.Contains(name))
+                continue;
             Assert.DoesNotContain(PersonalFragments, fragment => name == fragment || (fragment.Length > 2 && name.Contains(fragment)));
+            Assert.False(name.Contains("objectid") || name.Contains("entityid") || name.Contains("contentid") ||
+                         name.Contains("taggerid") || name.Contains("ownerid") || name.Contains("sourceid") ||
+                         name.Contains("targetid"), $"{type.Name}.{property.Name} looks like a game object id");
         }
     }
 
@@ -108,6 +132,10 @@ public class PayloadPrivacyTests
         Assert.Equal(12, (int)ObservationKind.CriticalEncounter);
         Assert.Equal(13, (int)ObservationKind.SelfDefeat);
         Assert.Equal(14, (int)ObservationKind.RecordingActive);
-        Assert.Equal(Enumerable.Range(1, 14), Enum.GetValues<ObservationKind>().Select(k => (int)k));
+        Assert.Equal(15, (int)ObservationKind.EnemySpawnPose);
+        Assert.Equal(16, (int)ObservationKind.EnemyFormChange);
+        Assert.Equal(17, (int)ObservationKind.EnemyIdleTrack);
+        Assert.Equal(18, (int)ObservationKind.EnemyAggro);
+        Assert.Equal(Enumerable.Range(1, 18), Enum.GetValues<ObservationKind>().Select(k => (int)k));
     }
 }

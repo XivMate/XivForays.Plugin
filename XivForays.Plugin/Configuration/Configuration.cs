@@ -20,6 +20,9 @@ public class Configuration : IPluginConfiguration
     public SystemConfiguration SystemConfiguration { get; set; } = new();
 
     public bool CanCrowdsourceData { get; set; } = false;
+
+    /// <summary>Pose capture pass: also record a 60 s idle track (kind 17) after each spawn pose. Off by default.</summary>
+    public bool CapturePass { get; set; } = false;
     
     /// <summary>
     /// Saves the configuration

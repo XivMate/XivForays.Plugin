@@ -52,6 +52,9 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IFramework Framework { get; private set; } = null!;
 
+    [PluginService]
+    internal static IPartyList PartyList { get; private set; } = null!;
+
     private const string CommandName = "/xivforays";
 
     public Configuration.Configuration Configuration { get; init; }
@@ -131,12 +134,14 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton(Framework);
         services.AddSingleton(FateTable);
         services.AddSingleton(ObjectTable);
+        services.AddSingleton(PartyList);
         services.AddSingleton(Log);
         services.AddSingleton(GameGui);
         services.AddSingleton<FateModule>();
         services.AddSingleton<SchedulerService>();
         services.AddSingleton<TerritoryService>();
         services.AddSingleton<ApiService>();
+        services.AddSingleton<PoseCaptureService>();
         services.AddSingleton<EnemyTrackingService>();
         services.AddSingleton<EnemyLocationGatherer>();
         services.AddSingleton<ForayService>();

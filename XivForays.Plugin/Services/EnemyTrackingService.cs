@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Numerics;
 using Dalamud.Game;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
@@ -14,7 +15,8 @@ using XivMate.DataGathering.Forays.Dalamud.Models;
 namespace XivMate.DataGathering.Forays.Dalamud.Services;
 
 public sealed class EnemyTrackingService(
-    IObjectTable objectTable, IDataManager dataManager, ForayService forayService, IClientState clientState)
+    IObjectTable objectTable, IDataManager dataManager, ForayService forayService, IClientState clientState,
+    PoseCaptureService poseCapture)
 {
     private readonly Lazy<HashSet<uint>> adaptationIds = new(() => FindStatuses(dataManager, "Adaptation", "Adaption"));
     private readonly Lazy<HashSet<uint>> mutationIds = new(() => FindStatuses(dataManager, "Mutation"));
@@ -48,6 +50,7 @@ public sealed class EnemyTrackingService(
     {
         tracked.Clear();
         lastRecorded.Clear();
+        poseCapture.Reset();
     }
 
     /// <summary>
@@ -64,6 +67,7 @@ public sealed class EnemyTrackingService(
             visitId = context.VisitId;
         }
 
+        poseCapture.BeginScan(context);
         var next = new Dictionary<ulong, TrackedEnemy>();
         var nextRecorded = new Dictionary<ulong, (float X, float Y, float Z)>();
         var snapshot = new List<EnemyPosition>();
@@ -77,9 +81,13 @@ public sealed class EnemyTrackingService(
             if (enemy.CurrentHp == 0 && previous?.Position.MobIngameId != enemy.BaseId)
                 continue;
 
+            Guid? replacedTrackId = null;
             if (previous != null && previous.Position.MobIngameId != enemy.BaseId)
             {
                 record(ToObservation(previous, context, ObservationKind.EnemyDisappeared));
+                // A live bnpcId change on the same object: pose capture records it as a form change.
+                if (!previous.IsDead)
+                    replacedTrackId = previous.Id;
                 previous = null;
             }
 
@@ -95,9 +103,24 @@ public sealed class EnemyTrackingService(
             if (current.IsDead)
             {
                 if (previous is { IsDead: false })
-                    record(ToObservation(current, context, ObservationKind.EnemyDied));
+                {
+                    var (claim, claimType, lastTarget) = poseCapture.Died(enemy, current.Id, current.LayoutId,
+                        current.Home ?? current.FirstPosition, PoseMath.Form(current.Position.IsMutated, current.Position.IsAdapted));
+                    var died = ToObservation(current, context, ObservationKind.EnemyDied) with
+                    {
+                        Claim = claim,
+                        ClaimType = claimType,
+                        LastTargetCategory = lastTarget
+                    };
+                    record(died);
+                    poseCapture.Note(died);
+                }
+
                 continue;
             }
+
+            poseCapture.Observe(enemy, current.Id, replacedTrackId, current.Position.IsMutated, current.Position.IsAdapted,
+                current.LayoutId, context, record);
 
             if (takeSnapshot)
                 snapshot.Add(current.Position);
@@ -107,7 +130,14 @@ public sealed class EnemyTrackingService(
             nextRecorded[id] = hasLast ? last : here;
             if (previous == null)
             {
-                record(ToObservation(current, context, ObservationKind.EnemyAppeared));
+                var appeared = ToObservation(current, context, ObservationKind.EnemyAppeared) with
+                {
+                    Respawn = poseCapture.Appeared(current.Position.MobIngameId, current.LayoutId,
+                        current.Home ?? current.FirstPosition, PoseMath.Form(current.Position.IsMutated, current.Position.IsAdapted))
+                };
+                record(appeared);
+                if (appeared.Respawn != null)
+                    poseCapture.Note(appeared);
                 nextRecorded[id] = here;
             }
             else if (periodicSample || previous.ForayLevel != current.ForayLevel ||
@@ -127,6 +157,7 @@ public sealed class EnemyTrackingService(
                 record(ToObservation(enemy, context, ObservationKind.EnemyDisappeared));
         }
 
+        poseCapture.EndScan(context, record);
         tracked = next;
         lastRecorded = nextRecorded;
         return snapshot;
@@ -179,8 +210,15 @@ public sealed class EnemyTrackingService(
             InstanceId = visit
         };
 
+        // Pose capture v2 raw ids on kinds 1-4. Keep the last live values on death.
+        var layoutId = dead && previous != null ? previous.LayoutId : character->GameObject.LayoutId;
+        var fateId = dead && previous != null ? previous.FateId : character->GameObject.FateId;
+        var homeRaw = (Vector3)character->GameObject.DefaultPosition;
+        Vector3? home = dead && previous != null ? previous.Home
+            : homeRaw == Vector3.Zero || !float.IsFinite(homeRaw.X) || !float.IsFinite(homeRaw.Y) || !float.IsFinite(homeRaw.Z)
+                ? null : homeRaw;
         return new TrackedEnemy(previous?.Id ?? Guid.NewGuid(), position, dead, enemy.Level, level, element,
-            modelCharaId, modelScale);
+            modelCharaId, modelScale, layoutId, fateId, home, previous?.FirstPosition ?? enemy.Position);
     }
 
     private static Observation ToObservation(TrackedEnemy enemy, Observation context, ObservationKind kind) =>
@@ -200,7 +238,10 @@ public sealed class EnemyTrackingService(
             IsMutated = enemy.Position.IsMutated,
             IsInCombat = enemy.Position.IsInCombat,
             ModelCharaId = enemy.ModelCharaId,
-            ModelScale = enemy.ModelScale
+            ModelScale = enemy.ModelScale,
+            LayoutId = enemy.LayoutId == 0 ? null : enemy.LayoutId,
+            FateId = enemy.FateId == 0 ? null : enemy.FateId,
+            HomePosition = enemy.Home is { } home ? PoseMath.Vec(home) : null
         };
 
     private static HashSet<uint> FindStatuses(IDataManager dataManager, params string[] names) =>
@@ -209,5 +250,6 @@ public sealed class EnemyTrackingService(
             .Select(row => row.RowId).ToHashSet();
 
     private sealed record TrackedEnemy(Guid Id, EnemyPosition Position, bool IsDead, byte CombatLevel,
-        byte? ForayLevel, byte ElementId, int? ModelCharaId, float? ModelScale);
+        byte? ForayLevel, byte ElementId, int? ModelCharaId, float? ModelScale, uint LayoutId, ushort FateId,
+        Vector3? Home, Vector3 FirstPosition);
 }

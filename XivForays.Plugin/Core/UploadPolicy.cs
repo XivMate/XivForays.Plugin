@@ -17,7 +17,10 @@ internal enum UploadOutcome
     EndpointMissing,
 
     /// <summary>401/403: the key is missing, wrong or disabled. Drop and pause.</summary>
-    Unauthorized
+    Unauthorized,
+
+    /// <summary>413: the request body is over the server's limit. Split the batch in two and send both halves (no backoff).</summary>
+    TooLarge
 }
 
 /// <summary>
@@ -31,6 +34,12 @@ internal sealed class UploadPolicy
 {
     public const int WorkerIntervalMs = 2000;
     public const int MaxBatchSize = 256;
+
+    /// <summary>
+    /// Serialized bytes per observations batch: well under the live server's 512 KB request limit (a 256-record pose
+    /// batch is about 590 KB). The new ingest allows 2 MB, so this is safe on both.
+    /// </summary>
+    public const int MaxBatchBytes = 400 * 1024;
     public const int MaxPending = 4096;
     public const long BaseBackoffMs = 2000;
     public const long MaxBackoffMs = 5 * 60 * 1000;
@@ -58,6 +67,8 @@ internal sealed class UploadPolicy
             return UploadOutcome.Retry;
         if (status == 404)
             return UploadOutcome.EndpointMissing;
+        if (status == 413)
+            return UploadOutcome.TooLarge;
         if (status is 401 or 403)
             return UploadOutcome.Unauthorized;
         // 3xx (redirects are disabled) and other 4xx: retrying cannot help.

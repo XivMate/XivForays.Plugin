@@ -11,7 +11,8 @@ namespace XivMate.DataGathering.Forays.Dalamud.Windows.Tabs;
 
 internal class DebugTab(
     FateModule fateModule,
-    EnemyTrackingService enemyTrackingService) : ITab
+    EnemyTrackingService enemyTrackingService,
+    PoseCaptureService poseCapture) : ITab
 {
     private bool Debug;
 
@@ -31,6 +32,16 @@ internal class DebugTab(
 
         if (ImGui.Checkbox("##CrowdsourceData", ref Debug)) { }
 
+        var capturePass = configuration.CapturePass;
+        if (ImGui.Checkbox("Capture pass: 60 s idle tracks after each spawn pose (kind 17)##CapturePass", ref capturePass))
+        {
+            configuration.CapturePass = capturePass;
+            configuration.Save();
+            poseCapture.CapturePass = capturePass;
+        }
+
+        RenderPoseTable();
+
         if (Debug)
         {
             enemies = enemyTrackingService.GetVisibleEnemies();
@@ -40,6 +51,33 @@ internal class DebugTab(
 
             ImGui.TextUnformatted($"Enemies on map {enemies.Count}");
             RenderEnemiesTable(enemies);
+        }
+    }
+
+    // Pose capture v2: what this visit recorded, as the same name-free lines written to dalamud.log.
+    private void RenderPoseTable()
+    {
+        ImGui.TextUnformatted(
+            $"Poses this visit: spawn {poseCapture.CountOf(ObservationKind.EnemySpawnPose)}, " +
+            $"form {poseCapture.CountOf(ObservationKind.EnemyFormChange)}, idle {poseCapture.CountOf(ObservationKind.EnemyIdleTrack)}, " +
+            $"aggro {poseCapture.CountOf(ObservationKind.EnemyAggro)}, died {poseCapture.CountOf(ObservationKind.EnemyDied)}, " +
+            $"respawns {poseCapture.RespawnCount}");
+        ImGui.TextUnformatted(
+            $"Tracked {poseCapture.TrackedCount}, dedupe keys {poseCapture.DedupeCount}, pending deaths {poseCapture.PendingDeaths}, " +
+            $"full reads last scan {poseCapture.LastScanFullReads}, dropped non-finite {poseCapture.DroppedNonFinite}, " +
+            $"read failures {poseCapture.ReadFailures}");
+        using var table = ImRaii.Table("##Poses", 1,
+                                       ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY,
+                                       new System.Numerics.Vector2(0, 220));
+        if (!table)
+            return;
+        ImGui.TableSetupColumn("Pose records (newest first)");
+        ImGui.TableHeadersRow();
+        foreach (var line in poseCapture.Recent)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(line);
         }
     }
 

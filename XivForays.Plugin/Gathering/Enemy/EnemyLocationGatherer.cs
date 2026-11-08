@@ -11,6 +11,7 @@ namespace XivMate.DataGathering.Forays.Dalamud.Gathering.Enemy;
 
 internal sealed class EnemyLocationGatherer(
     EnemyTrackingService enemies,
+    PoseCaptureService poseCapture,
     ObservationService observations,
     SchedulerService scheduler,
     IPluginLog log,
@@ -27,6 +28,7 @@ internal sealed class EnemyLocationGatherer(
 
     public void LoadConfig(Configuration.Configuration configuration)
     {
+        poseCapture.CapturePass = configuration.CapturePass;
         if (configuration.CanCrowdsourceData == enabled)
             return;
 

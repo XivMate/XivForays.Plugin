@@ -21,7 +21,19 @@ internal enum ObservationKind
     SelfDefeat = 13,
 
     /// <summary>Coverage heartbeat (every 30 s while recording): own position, zone, map, weather and levels. Grouped by VisitId (and the API key server-side).</summary>
-    RecordingActive = 14
+    RecordingActive = 14,
+
+    /// <summary>Pose capture v2: one settled spawn pose per enemy instance (plus at most one near retake). See docs/CAPTURE_DESIGN.md.</summary>
+    EnemySpawnPose = 15,
+
+    /// <summary>Pose capture v2: an enemy's form key changed (mutation, adaptation, model, scale, ids): before and after.</summary>
+    EnemyFormChange = 16,
+
+    /// <summary>Pose capture v2, capture-pass mode only: a 60 s idle track after the spawn pose.</summary>
+    EnemyIdleTrack = 17,
+
+    /// <summary>Pose capture v2: an enemy's out-of-combat to in-combat edge, with the local player's state (categories only).</summary>
+    EnemyAggro = 18
 }
 
 /// <summary>FATE result on FateEnded: from the end state (Ended/Failed), else from the last progress (100 = success).</summary>
@@ -81,4 +93,42 @@ internal sealed record Observation
 
     /// <summary>FateEnded only: seconds from the FATE start (StartedAt) to this observation.</summary>
     public uint? DurationSeconds { get; init; }
+
+    // Pose capture v2 (docs/CAPTURE_DESIGN.md). schemaVersion stays 1; the nested objects carry poseVersion.
+
+    /// <summary>Kinds 1-4, 15, 16, 18: GameObject.LayoutId (raw; 0 is sent as null).</summary>
+    public uint? LayoutId { get; init; }
+
+    /// <summary>Kinds 1-4, 15, 18: Character.FateId (FATE adds; 0 is sent as null).</summary>
+    public ushort? FateId { get; init; }
+
+    /// <summary>Kinds 1-4: Character.DefaultPosition [x, y, z] (raw home point; all-zero is sent as null).</summary>
+    public float[]? HomePosition { get; init; }
+
+    /// <summary>Kind 3: the claimer category (<see cref="Core.ObjectCategory"/>) from CombatTaggerId. Never the id.</summary>
+    public byte? Claim { get; init; }
+
+    /// <summary>Kind 3: Character.CombatTagType (raw).</summary>
+    public byte? ClaimType { get; init; }
+
+    /// <summary>Kind 3: the category of the enemy's last target while alive.</summary>
+    public byte? LastTargetCategory { get; init; }
+
+    /// <summary>Kind 16: the previous track when a bnpcId change made the tracker start a new track.</summary>
+    public Guid? BeforeTrackId { get; init; }
+
+    /// <summary>Kind 15.</summary>
+    public EnemyPose? Pose { get; init; }
+
+    /// <summary>Kind 16.</summary>
+    public EnemyFormChange? FormChange { get; init; }
+
+    /// <summary>Kind 17.</summary>
+    public EnemyIdleTrack? Idle { get; init; }
+
+    /// <summary>Kind 18.</summary>
+    public EnemyAggro? Aggro { get; init; }
+
+    /// <summary>Kind 1: this appearance matched an earlier death of the same enemy at the same spawn point (this visit).</summary>
+    public EnemyRespawn? Respawn { get; init; }
 }

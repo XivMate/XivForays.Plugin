@@ -22,7 +22,7 @@ public class UploadPolicyTests
     [InlineData(408, UploadOutcome.Retry)]
     [InlineData(429, UploadOutcome.Retry)]
     [InlineData(400, UploadOutcome.Drop)]
-    [InlineData(413, UploadOutcome.Drop)]
+    [InlineData(413, UploadOutcome.TooLarge)]
     [InlineData(422, UploadOutcome.Drop)]
     [InlineData(302, UploadOutcome.Drop)]
     [InlineData(404, UploadOutcome.EndpointMissing)]
