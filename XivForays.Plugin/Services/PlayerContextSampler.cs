@@ -12,14 +12,16 @@ using XivMate.DataGathering.Forays.Dalamud.Core;
 using XivMate.DataGathering.Forays.Dalamud.Models;
 using Framework = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework;
 using NativeCharacter = FFXIVClientStructs.FFXIV.Client.Game.Character.Character;
+using NativePartyMember = FFXIVClientStructs.FFXIV.Client.Game.Group.PartyMember;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Services;
 
 /// <summary>
 /// Kind 19 PlayerContext (task 2026-11-08-1300), sampled on the existing 1 s signal tick and recorded on change
 /// (at most every 5 s) or every 60 s. READ-ONLY: static-address structs (PlayerState, UIState, Framework,
-/// EventFramework) and the object table / party list; no game function calls, no hooks. Group members are
-/// job / level / role only; own statuses are allow-listed.
+/// EventFramework, GroupManager party members) and the object table / party list; no game function calls, no hooks.
+/// Group members are job / level / role / foray level / effective foray level / synced only; own statuses are
+/// allow-listed.
 /// </summary>
 public sealed class PlayerContextSampler(IObjectTable objectTable, IPartyList partyList, IDataManager dataManager, IPluginLog log)
 {
@@ -40,6 +42,9 @@ public sealed class PlayerContextSampler(IObjectTable objectTable, IPartyList pa
 
     internal int Recorded { get; private set; }
     internal string LastLine { get; private set; } = "";
+
+    /// <summary>The last group rows as text (numbers only), for the Debug tab: "job/level/role el eff/cur sync".</summary>
+    internal string LastGroupLine { get; private set; } = "";
 
     internal void Reset()
     {
@@ -68,6 +73,7 @@ public sealed class PlayerContextSampler(IObjectTable objectTable, IPartyList pa
         var current = Read(context);
         if (current == null)
             return;
+        LastGroupLine = ContextLog.GroupLine(current.Group);
         var now = Environment.TickCount64;
         var changed = ContextRules.Diff(last, current, lastTop, context);
         var reason = ContextRules.Due(now, lastMs, last != null, changed);
@@ -171,15 +177,25 @@ public sealed class PlayerContextSampler(IObjectTable objectTable, IPartyList pa
             }
         }
 
-        // Group: jobs, levels and roles of the OTHER members only (no names, content ids, object ids, worlds).
+        // Group: the OTHER members as numbers only (no names, content ids, object ids, worlds): job, level, role and
+        // their foray level / effective level / sync flag, read from the GroupManager PartyMember content key/values
+        // (a plain field read; the same data the party list shows in foray zones).
         var group = new List<int[]>();
         var self = local.EntityId;
+        Span<(uint, uint)> values = stackalloc (uint, uint)[3];
         foreach (var member in partyList)
         {
             if (member.EntityId == self)
                 continue;
             var job = member.ClassJob.RowId;
-            group.Add([(int)job, member.Level, roles.Value.TryGetValue(job, out var role) ? role : 0]);
+            var count = 0;
+            var party = (NativePartyMember*)member.Address;
+            if (party != null)
+                foreach (var pair in party->ContentKeyValueData)
+                    if (count < values.Length)
+                        values[count++] = (pair.Item1, pair.Item2);
+            group.Add(ContextRules.MemberRow(context.TerritoryId, (int)job, member.Level,
+                roles.Value.TryGetValue(job, out var role) ? role : 0, values[..count]));
         }
 
         var statuses = new List<int[]>();
@@ -217,7 +233,7 @@ public sealed class PlayerContextSampler(IObjectTable objectTable, IPartyList pa
             LastChainAtMs = lastChainAtMs,
             GroupSize = Math.Max(1, partyList.Length),
             Alliance = partyList.IsAlliance,
-            Group = group.OrderBy(g => g[0]).ThenBy(g => g[1]).ToArray(),
+            Group = ContextRules.SortRows(group),
             Statuses = statuses.OrderBy(s => s[0]).ToArray()
         };
     }

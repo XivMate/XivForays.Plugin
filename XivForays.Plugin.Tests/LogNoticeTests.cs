@@ -118,7 +118,7 @@ public class LogNoticeTests
         Assert.Equal(ContextRules.CaptureRevision, pose.RootElement.GetProperty("captureRevision").GetInt32());
         using var aggro = JsonDocument.Parse(JsonSerializer.Serialize(new EnemyAggro(), ObservationJson.Options));
         Assert.Equal(ContextRules.CaptureRevision, aggro.RootElement.GetProperty("captureRevision").GetInt32());
-        Assert.Equal(2, ContextRules.CaptureRevision);
+        Assert.Equal(3, ContextRules.CaptureRevision);
 
         var chain = context with { Kind = ObservationKind.Chain, ChainNumber = 12, ChainSecondsLeft = 30 };
         using var c = JsonDocument.Parse(JsonSerializer.Serialize(chain, ObservationJson.Options));

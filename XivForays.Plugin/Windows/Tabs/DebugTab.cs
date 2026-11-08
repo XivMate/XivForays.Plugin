@@ -64,6 +64,7 @@ internal class DebugTab(
             $"aggro {poseCapture.CountOf(ObservationKind.EnemyAggro)}, died {poseCapture.CountOf(ObservationKind.EnemyDied)}, " +
             $"respawns {poseCapture.RespawnCount}, spawn points seen {poseCapture.SpawnPointCount}");
         ImGui.TextUnformatted($"Player context records {playerContext.Recorded}: {playerContext.LastLine}");
+        ImGui.TextUnformatted($"Group (job/level/role foray effective/current): {playerContext.LastGroupLine}");
         ImGui.TextUnformatted(
             $"Tracked {poseCapture.TrackedCount}, dedupe keys {poseCapture.DedupeCount}, pending deaths {poseCapture.PendingDeaths}, " +
             $"full reads last scan {poseCapture.LastScanFullReads}, dropped non-finite {poseCapture.DroppedNonFinite}, " +

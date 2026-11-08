@@ -13,7 +13,10 @@ Zadnor, Delubrum and Occult Crescent. Outside those zones it does nothing.
 - **Your own foray state:** your position every 30 seconds, job and level, elemental/knowledge level, the magia board,
   the chain timer, whether you are dead or mounted, and a short list of foray buffs (sprint, sneak, logos/lost/phantom
   actions, food, raise/weakness).
-- **Your group, as numbers only:** how many are in your party, and each member's job, level and role.
+- **Your group, as numbers only:** how many are in your party, and each member's job, level and role, plus their
+  foray level as the party list shows it: in Eureka their elemental level, the level they are synced to and whether
+  they are synced; in Bozja and Zadnor their resistance rank; in the Occult Crescent their knowledge level and the
+  level they are synced to.
 - **Context:** zone, the world (server) you are on, weather, game version, plugin version and times.
 
 ## What it never sends
@@ -21,7 +24,7 @@ Zadnor, Delubrum and Occult Crescent. Outside those zones it does nothing.
 - No character names: not yours, not your party's, not anyone else's.
 - No content ids, account ids, object ids or home worlds of other players.
 - No chat, tells, party chat or free company messages.
-- No other players' positions, jobs or statuses (only your own party members' job, level and role).
+- No other players' positions, jobs or statuses (only your own party members' job, level, role and foray level).
 - Nothing outside the foray zones.
 
 ## How it is sent

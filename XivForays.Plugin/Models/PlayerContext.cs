@@ -1,8 +1,8 @@
 namespace XivMate.DataGathering.Forays.Dalamud.Models;
 
 // Kind 19 PlayerContext (task 2026-11-08-1300): the local player's foray context while recording. Numbers and bools
-// only. Group members are job / level / role only: never names, content ids, object ids or worlds. Player statuses
-// are an allow-list (Core.ContextRules.IsAllowedStatusName).
+// only. Group members are job / level / role / foray level / effective foray level / synced only: never names,
+// content ids, object ids or worlds. Player statuses are an allow-list (Core.ContextRules.IsAllowedStatusName).
 
 internal sealed record PlayerContext
 {
@@ -65,7 +65,12 @@ internal sealed record PlayerContext
 
     public bool Alliance { get; init; }
 
-    /// <summary>Other members: [[classJobId, level, role]] (role from the ClassJob sheet), sorted; no names or ids.</summary>
+    /// <summary>
+    /// Other members: [[classJobId, level, role, forayLevel, effectiveForayLevel, synced]] (role from the ClassJob
+    /// sheet), sorted; no names or ids. Foray columns: Eureka elemental level / effective elemental level / synced;
+    /// Bozja resistance rank / 0 / 0; Occult knowledge level / effective knowledge level / synced; 0 when not loaded
+    /// (Core.ContextRules.MemberRow). Rows had only the first three columns before captureRevision 3.
+    /// </summary>
     public int[][] Group { get; init; } = [];
 
     /// <summary>Allow-listed own statuses: [[statusId, param, timeLeftDs]].</summary>

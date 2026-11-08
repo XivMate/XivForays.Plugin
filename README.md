@@ -12,7 +12,7 @@ An opt-in, passive Dalamud plugin that contributes world observations from Eurek
    https://github.com/XivMate/XivForays/releases/latest/download/repo.json
    ```
 
-3. Open `/xlplugins`, find **XivMate Foray Data Gathering** and choose **Install**. Use a Dalamud build that supports API 15 for version 0.0.0.13.
+3. Open `/xlplugins`, find **XivMate Foray Data Gathering** and choose **Install**. Use a Dalamud build that supports API 15 for version 0.0.0.14.
 4. Get your own API key from Jake or the [Forays site](https://web.xivforays.com/). Enter it in the first-run window or under **System** in `/xivforays config`. Keep the default API URL `https://web.xivforays.com/api/forays/`. Enable **Crowdsource data** in **General** when you want to contribute.
 
 To update, open `/xlplugins` and install the available update. Keep the same repository URL. If you previously loaded a developer copy or used an older repository entry for this plugin, remove that entry before installing from the Friends feed.
@@ -28,7 +28,7 @@ Sharing is off on a fresh install. Nothing is read or sent outside these zones, 
 | Every record | record kind, UTC time, a random visit ID (new on every zone entry), zone and map ID, weather ID; in Eureka your current/effective elemental level and sync flag, in the Occult Crescent your current/effective Knowledge Level |
 | Coverage heartbeat (every 30 s) | your own position (x, y, z) and the game version. No name, job, world or character ID |
 | Enemy poses | settled position, rotation, scale, model, skeleton, animation and raw state flags of enemies near you; form changes; the moment an enemy starts fighting (angles, distance, your movement/casting state). Other players appear only as a category (self, party, other player, pet, NPC) |
-| Your foray context (on change, at most every 5 s, and every 60 s) | job and level, elemental/knowledge level, magia board, chain timer, dead/mounted/in combat, a short allow-list of foray buffs, your own current world (server), and your party's size plus each member's job, level and role. No names, IDs or other players' worlds |
+| Your foray context (on change, at most every 5 s, and every 60 s) | job and level, elemental/knowledge level, magia board, chain timer, dead/mounted/in combat, a short allow-list of foray buffs, your own current world (server), and your party's size plus each member's job, level, role and foray level (Eureka elemental level, synced level and sync flag; Bozja resistance rank; Occult knowledge level and synced level). No names, IDs or other players' worlds |
 | Enemies near you | game NPC ID, a random per-enemy track ID, position, levels, element, mutated/adapted, in-combat, model ID and scale; when they appear, die in view, leave view, change, move 15+ yalms, and every 30 s. The legacy snapshot with the enemy's game-defined name is off by default since 0.0.0.13 |
 | FATEs | FATE ID, game-defined FATE name (legacy route), centre, radius, start time, progress, state |
 | Critical engagements (Bozja, Zadnor, Occult Crescent) | encounter ID, state, progress, start time, seconds left, marker position and radius |
@@ -37,7 +37,7 @@ Sharing is off on a fresh install. Nothing is read or sent outside these zones, 
 
 Every upload carries the plugin version and the API key you entered (to authenticate). The server stores the key with legacy enemy/FATE records and a SHA-256 of it with the newer records. The server also sees your IP address as part of normal web traffic.
 
-**Never sent or logged:** chat text from any channel (say, party, FC, linkshell, tell, ...), chat sender names, player or character names, character/content/account IDs, other players' positions or data, names or IDs of your party members (only their job, level and role), inventory, retainers, screenshots, or files. The plugin only looks at the system loot/error channels for your own notices and keeps the numbers. It does not write chat, names, request bodies or your API key to `dalamud.log`; its log lines are short status messages (for example "observations endpoint returned 404").
+**Never sent or logged:** chat text from any channel (say, party, FC, linkshell, tell, ...), chat sender names, player or character names, character/content/account IDs, other players' positions or data, names or IDs of your party members (only their job, level, role and foray level), inventory, retainers, screenshots, or files. The plugin only looks at the system loot/error channels for your own notices and keeps the numbers. It does not write chat, names, request bodies or your API key to `dalamud.log`; its log lines are short status messages (for example "observations endpoint returned 404").
 
 Turn off **Crowdsource data** in `/xivforays config` under **General** to stop collecting and clear pending uploads (a request already in flight may still finish). See [what we collect](docs/WHAT_WE_COLLECT.md) for a plain summary and the [capture specification](docs/CAPTURE_SPEC.md) for field names and limits.
 

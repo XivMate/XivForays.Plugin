@@ -12,9 +12,10 @@ internal static class ContextRules
 {
     /// <summary>
     /// Capture logic revision, sent on every pose and context record. 1 = pose capture v2 + context; 2 = release 0.0.0.13
-    /// (70 y tilt trust, closer re-takes, language-independent notices, legacy snapshots off). Bump on any capture change.
+    /// (70 y tilt trust, closer re-takes, language-independent notices, legacy snapshots off); 3 = release 0.0.0.14
+    /// (group rows carry each member's foray level, effective level and sync flag). Bump on any capture change.
     /// </summary>
-    public const int CaptureRevision = 2;
+    public const int CaptureRevision = 3;
 
     /// <summary>A change is recorded at most this often.</summary>
     public const long MinChangeMs = 5000;
@@ -103,6 +104,72 @@ internal static class ContextRules
         "Raise", "Reraise", "Reraiser", "Well Fed", "Elemental Attunement", "Magia Aether"
     ];
 
+    /// <summary>
+    /// One other group member as numbers: [classJobId, level, role, forayLevel, effectiveForayLevel, synced].
+    /// The foray columns come from the member's PartyMember content key/values (the same keys as PlayerState):
+    /// Eureka: elemental level (key 4), effective elemental level (key 2), synced (key 3).
+    /// Bozja/Zadnor/Delubrum: resistance rank (key 5); no effective rank or sync flag exists, so 0 and 0.
+    /// Occult Crescent: knowledge level (key 7), effective knowledge level (key 6); synced is 1 when the effective
+    /// level is below the current one (there is no separate sync key).
+    /// Elsewhere, or when the game has not loaded the values for that member, the foray columns are 0.
+    /// </summary>
+    public static int[] MemberRow(uint territory, int job, int level, int role, ReadOnlySpan<(uint Key, uint Value)> values)
+    {
+        int foray = 0, effective = 0, synced = 0;
+        if (ForayZones.IsEureka(territory))
+        {
+            foray = Value(values, 4);
+            effective = Value(values, 2);
+            synced = effective != 0 && Value(values, 3) != 0 ? 1 : 0;
+        }
+        else if (ForayZones.IsBozja(territory))
+        {
+            foray = Value(values, 5);
+        }
+        else if (ForayZones.IsOccultCrescent(territory))
+        {
+            foray = Value(values, 7);
+            effective = Value(values, 6);
+            synced = effective != 0 && foray != 0 && effective < foray ? 1 : 0;
+        }
+
+        return [job, level, role, foray, effective, synced];
+    }
+
+    private static int Value(ReadOnlySpan<(uint Key, uint Value)> values, uint key)
+    {
+        foreach (var (k, v) in values)
+            if (k == key)
+                return v > int.MaxValue ? 0 : (int)v;
+        return 0;
+    }
+
+    /// <summary>Group rows sorted by every column, so the same group always gives the same order.</summary>
+    public static int[][] SortRows(System.Collections.Generic.IEnumerable<int[]> rows) =>
+        rows.OrderBy(r => r, RowOrder.Instance).ToArray();
+
+    private sealed class RowOrder : System.Collections.Generic.IComparer<int[]>
+    {
+        public static readonly RowOrder Instance = new();
+
+        public int Compare(int[]? x, int[]? y)
+        {
+            if (ReferenceEquals(x, y))
+                return 0;
+            if (x == null)
+                return -1;
+            if (y == null)
+                return 1;
+            for (var i = 0; i < Math.Min(x.Length, y.Length); i++)
+            {
+                var c = x[i].CompareTo(y[i]);
+                if (c != 0)
+                    return c;
+            }
+            return x.Length.CompareTo(y.Length);
+        }
+    }
+
     internal static bool SameInts(int[]? a, int[]? b) => Same(a, b);
 
     private static bool Same(int[]? a, int[]? b) => a == null ? b == null : b != null && a.SequenceEqual(b);
@@ -127,4 +194,10 @@ internal static class ContextLog
             c.Eureka == null ? "-" : string.Join(",", c.Eureka.Board), c.Chain is { Length: > 0 } ch ? ch[0].ToString("0.0", inv) : "-",
             c.LastChainNumber ?? 0, c.GroupSize, c.Statuses.Length, c.Dead ? 1 : 0, c.InstanceStartTs ?? 0);
     }
+
+    /// <summary>Group rows as "job/level/role foray effective/current sync" per member; numbers only.</summary>
+    public static string GroupLine(int[][] group) =>
+        group.Length == 0 ? "-" : string.Join("; ", group.Select(r => r.Length < 6
+            ? string.Join("/", r)
+            : $"{r[0]}/{r[1]}/{r[2]} foray {r[4]}/{r[3]}{(r[5] != 0 ? " synced" : "")}"));
 }

@@ -1,15 +1,18 @@
-# Friends release checklist (0.0.0.13)
+# Friends release checklist (0.0.0.14)
 
 Plugin: XivMate Foray Data Gathering (`XivForays.Plugin`), Dalamud API 15.
 
 ## 1. Before tagging
 
 1. Merge the release branch into `master` (it holds pose capture, player context and the release fixes).
-2. `XivForays.Plugin/XivForays.Plugin.csproj` has `<Version>0.0.0.13</Version>`; `Core/ContextRules.cs` has
-   `CaptureRevision = 2`. Bump both whenever capture logic changes.
+2. `XivForays.Plugin/XivForays.Plugin.csproj` has `<Version>0.0.0.14</Version>`; `Core/ContextRules.cs` has
+   `CaptureRevision = 3`. Bump both whenever capture logic changes.
 3. `dotnet test XivForays.Plugin.Tests -c Release -p:Platform=x64` is green.
 4. Build `dotnet build XivForays.Plugin/XivForays.Plugin.csproj -c Release -p:Platform=x64` and check one session in game:
    - the Debug tab shows pose and player-context lines, and dalamud.log has no `[XivForays.Plugin]` warnings;
+   - in a party in Eureka, the Debug tab "Group" line shows each member's effective/current elemental level as the
+     party list does (and "synced" while a member is synced to a FATE or NM); in Bozja the resistance rank; in the
+     Occult Crescent the effective/current knowledge level. All zeros there means the game did not load the values;
    - the raw store shows kinds 1-19 for that visit, kind 14 with `gameVersion`, and no `enemyposition` uploads.
 5. Re-read `docs/WHAT_WE_COLLECT.md`; send it to friends with the install steps.
 
@@ -19,21 +22,21 @@ Plugin: XivMate Foray Data Gathering (`XivForays.Plugin`), Dalamud API 15.
    Check first that no file or commit holds a key or private data.
 2. Tag and push:
    ```
-   git tag friends-v0.0.0.13
-   git push origin master friends-v0.0.0.13
+   git tag friends-v0.0.0.14
+   git push origin master friends-v0.0.0.14
    ```
 3. The "Publish Friends Release" workflow (`.github/workflows/release.yml`) builds, tests, writes `repo.json` with
-   `releases/download/friends-v0.0.0.13/XivForays.Plugin.zip` and publishes the release as Latest.
+   `releases/download/friends-v0.0.0.14/XivForays.Plugin.zip` and publishes the release as Latest.
 4. Check without signing in (private browser window or curl):
    `curl -sL https://github.com/XivMate/XivForays/releases/latest/download/repo.json`
-   must return the JSON with `"AssemblyVersion": "0.0.0.13"`.
+   must return the JSON with `"AssemblyVersion": "0.0.0.14"`.
 
 ## 3. Publish: option B, host on web.xivforays.com (repo stays private)
 
 1. Build the package locally (step 1.4); it is `XivForays.Plugin/bin/x64/Release/XivForays.Plugin/latest.zip`.
 2. Make the listing:
    ```
-   pwsh ./.github/scripts/New-FriendsRelease.ps1 -Tag friends-v0.0.0.13 -Repository XivMate/XivForays `
+   pwsh ./.github/scripts/New-FriendsRelease.ps1 -Tag friends-v0.0.0.14 -Repository XivMate/XivForays `
      -Package XivForays.Plugin/bin/x64/Release/XivForays.Plugin/latest.zip -OutputDirectory out/friends
    ```
    Then edit `out/friends/repo.json`: set `DownloadLinkInstall` and `DownloadLinkUpdate` to
