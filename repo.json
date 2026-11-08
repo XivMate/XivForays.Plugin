@@ -5,7 +5,7 @@
     "Punchline": "Crowdsourced data for Adventuring Forays",
     "Description": "Share opt-in enemy, event and treasure observations from Eureka, Bozja, Zadnor and Occult Crescent. Open /xivforays config for settings.",
     "InternalName": "XivForays.Plugin",
-    "AssemblyVersion": "0.0.0.12",
+    "AssemblyVersion": "0.0.0.13",
     "TestingAssemblyVersion": null,
     "RepoUrl": "https://github.com/XivMate/XivForays",
     "ApplicableVersion": "any",
@@ -13,7 +13,7 @@
     "IsHide": false,
     "IsTestingExclusive": false,
     "LastUpdate": 0,
-    "DownloadLinkInstall": "https://github.com/XivMate/XivForays/releases/download/friends-v0.0.0.12/XivForays.Plugin.zip",
-    "DownloadLinkUpdate": "https://github.com/XivMate/XivForays/releases/download/friends-v0.0.0.12/XivForays.Plugin.zip"
+    "DownloadLinkInstall": "https://github.com/XivMate/XivForays/releases/download/friends-v0.0.0.13/XivForays.Plugin.zip",
+    "DownloadLinkUpdate": "https://github.com/XivMate/XivForays/releases/download/friends-v0.0.0.13/XivForays.Plugin.zip"
   }
 ]

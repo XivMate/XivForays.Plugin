@@ -10,8 +10,11 @@ namespace XivMate.DataGathering.Forays.Dalamud.Core;
 /// </summary>
 internal static class ContextRules
 {
-    /// <summary>Capture logic revision: 1 = pose capture v2 + context (feature/capture-context). Bump on any capture change.</summary>
-    public const int CaptureRevision = 1;
+    /// <summary>
+    /// Capture logic revision, sent on every pose and context record. 1 = pose capture v2 + context; 2 = release 0.0.0.13
+    /// (70 y tilt trust, closer re-takes, language-independent notices, legacy snapshots off). Bump on any capture change.
+    /// </summary>
+    public const int CaptureRevision = 2;
 
     /// <summary>A change is recorded at most this often.</summary>
     public const long MinChangeMs = 5000;

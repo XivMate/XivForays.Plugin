@@ -23,12 +23,16 @@ internal sealed class EnemyLocationGatherer(
     private long lastSnapshot;
     private long lastPeriodicSample;
     private volatile bool enabled;
+    private volatile bool legacySnapshots;
 
     public bool Enabled => enabled;
 
     public void LoadConfig(Configuration.Configuration configuration)
     {
         poseCapture.CapturePass = configuration.CapturePass;
+        legacySnapshots = configuration.LegacyEnemySnapshots;
+        if (!legacySnapshots)
+            queue = new();
         if (configuration.CanCrowdsourceData == enabled)
             return;
 
@@ -57,7 +61,8 @@ internal sealed class EnemyLocationGatherer(
         try
         {
             var now = Environment.TickCount64;
-            var snapshotDue = now - lastSnapshot >= StreamRates.LegacySnapshotMs || lastSnapshot == 0;
+            // The legacy snapshot (with monster names) only when the setting is on (off by default).
+            var snapshotDue = legacySnapshots && (now - lastSnapshot >= StreamRates.LegacySnapshotMs || lastSnapshot == 0);
             var periodicDue = now - lastPeriodicSample >= StreamRates.EnemyPeriodicSampleMs || lastPeriodicSample == 0;
             if (periodicDue)
                 lastPeriodicSample = now;

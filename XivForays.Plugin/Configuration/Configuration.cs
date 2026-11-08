@@ -23,6 +23,12 @@ public class Configuration : IPluginConfiguration
 
     /// <summary>Pose capture pass: also record a 60 s idle track (kind 17) after each spawn pose. Off by default.</summary>
     public bool CapturePass { get; set; } = false;
+
+    /// <summary>
+    /// The legacy "enemyposition" upload (a 15 s snapshot of visible enemies WITH monster names, a separate route).
+    /// Off by default since 0.0.0.13: the observations stream carries the same data without strings.
+    /// </summary>
+    public bool LegacyEnemySnapshots { get; set; } = false;
     
     /// <summary>
     /// Saves the configuration

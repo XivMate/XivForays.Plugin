@@ -150,4 +150,10 @@ internal sealed record Observation
 
     /// <summary>Kind 19.</summary>
     public PlayerContext? Situation { get; init; }
+
+    /// <summary>Kind 10: seconds left on the chain from the structured notice (0 = maximum chain reached).</summary>
+    public uint? ChainSecondsLeft { get; init; }
+
+    /// <summary>Kind 14: the game version (ffxivgame.ver digits as one number, e.g. 2025100100000000).</summary>
+    public long? GameVersion { get; init; }
 }

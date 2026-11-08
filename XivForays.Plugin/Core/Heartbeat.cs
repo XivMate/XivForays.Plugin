@@ -15,7 +15,7 @@ internal static class Heartbeat
 
     public static bool IsDue(long nowMs, long lastSentMs) => lastSentMs == 0 || nowMs - lastSentMs >= IntervalMs;
 
-    public static Observation Create(Observation context, Vector3 position) => new()
+    public static Observation Create(Observation context, Vector3 position, long? gameVersion = null) => new()
     {
         Kind = ObservationKind.RecordingActive,
         ObservedAtMs = context.ObservedAtMs,
@@ -30,6 +30,7 @@ internal static class Heartbeat
         PlayerEffectiveKnowledgeLevel = context.PlayerEffectiveKnowledgeLevel,
         X = position.X,
         Y = position.Y,
-        Z = position.Z
+        Z = position.Z,
+        GameVersion = gameVersion
     };
 }

@@ -12,6 +12,7 @@ using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Game.Event;
 using FFXIVClientStructs.FFXIV.Client.Game.InstanceContent;
 using Lumina.Excel.Sheets;
 using XivMate.DataGathering.Forays.Dalamud.Core;
@@ -31,6 +32,9 @@ internal sealed partial class ForaySignalModule(
     SchedulerService scheduler,
     IPluginLog log) : IModule
 {
+    private readonly NoticePairing pairing = new();
+    private readonly Lazy<long?> gameVersion = new(() =>
+        LogNotices.GameVersionNumber(data.GameData.Repositories.TryGetValue("ffxiv", out var repo) ? repo.Version : null));
     private Dictionary<ulong, (uint BaseId, Vector3 Position)> treasures = new();
     private Dictionary<ushort, Observation> encounters = new();
     private Guid visitId;
@@ -47,11 +51,14 @@ internal sealed partial class ForaySignalModule(
         if (Enabled)
         {
             chatGui.ChatMessage += OnGameNotice;
+            chatGui.LogMessage += OnLogMessage;
             scheduler.ScheduleOnFrameworkThread(SignalTick, StreamRates.SignalScanMs);
         }
         else
         {
             chatGui.ChatMessage -= OnGameNotice;
+            chatGui.LogMessage -= OnLogMessage;
+            pairing.Clear();
             scheduler.CancelScheduledTask(SignalTick);
             treasures.Clear();
             encounters.Clear();
@@ -60,6 +67,73 @@ internal sealed partial class ForaySignalModule(
         }
     }
 
+    /// <summary>
+    /// Language-independent notices (task 2026-11-08-1353): the LogMessage row id and its integer parameters. Read-only:
+    /// the message is never prevented or changed. Names of the source/target are compared in memory only.
+    /// </summary>
+    private void OnLogMessage(ILogMessage message)
+    {
+        if (!Enabled || !framework.IsInFrameworkUpdateThread)
+            return;
+        var player = objects.LocalPlayer;
+        if (player == null || !forayService.IsInRecordableTerritory())
+            return;
+
+        try
+        {
+            int? Int(int index) => message.TryGetIntParameter(index, out var value) ? value : null;
+            var row = message.LogMessageId;
+            var now = Environment.TickCount64;
+            if (LogNotices.Chain(row, Int) is { } chain)
+            {
+                pairing.Structured((int)ObservationKind.Chain, now);
+                RecordChain(chain.Number, chain.SecondsLeft);
+                return;
+            }
+
+            if (LogNotices.Loot(row, Int) is { } loot)
+            {
+                pairing.Structured((int)ObservationKind.Loot, now);
+                observations.Record(observations.GetContext() with
+                {
+                    Kind = ObservationKind.Loot, GameId = loot.ItemId, Quantity = loot.Quantity
+                });
+                return;
+            }
+
+            if (row == LogNotices.DefeatRow)
+            {
+                var source = message.SourceEntity;
+                var target = message.TargetEntity;
+                var self = source is { IsPlayer: true } && source.HomeWorldId == player.HomeWorld.RowId &&
+                           source.Name.ExtractText() == player.Name.TextValue;
+                if (LogNotices.SelfDefeat(row, self, target?.IsPlayer ?? true))
+                {
+                    pairing.Structured((int)ObservationKind.SelfDefeat, now);
+                    observations.Record(observations.GetContext() with { Kind = ObservationKind.SelfDefeat });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            log.Warning($"Foray notice reading failed ({ex.GetType().Name}).");
+        }
+    }
+
+    private void RecordChain(uint number, uint? secondsLeft)
+    {
+        var chainRecord = observations.GetContext() with
+        {
+            Kind = ObservationKind.Chain, ChainNumber = number, ChainSecondsLeft = secondsLeft
+        };
+        observations.Record(chainRecord);
+        playerContext.NoteChain(number, chainRecord.ObservedAtMs);
+    }
+
+    /// <summary>
+    /// The English chat-text fallback (system and loot channels of the local player only; never player chat). It
+    /// records only notices the structured LogMessage path did not take (see <see cref="NoticePairing"/>).
+    /// </summary>
     private void OnGameNotice(IHandleableChatMessage chat)
     {
         if (!Enabled || !framework.IsInFrameworkUpdateThread)
@@ -76,43 +150,34 @@ internal sealed partial class ForaySignalModule(
 
         var message = chat.OriginalMessage;
         var text = message.ExtractText().Trim();
+        var now = Environment.TickCount64;
         if (kind == XivChatType.SystemError)
         {
-            var chain = ChainNotice().Match(text);
-            if (chain.Success && uint.TryParse(chain.Groups[1].ValueSpan, NumberStyles.None,
-                    CultureInfo.InvariantCulture, out var count))
+            if (EnglishNotices.Chain(text) is { } count)
             {
-                var chainRecord = observations.GetContext() with { Kind = ObservationKind.Chain, ChainNumber = count };
-                observations.Record(chainRecord);
-                playerContext.NoteChain(count, chainRecord.ObservedAtMs);
+                if (pairing.FallbackRecords((int)ObservationKind.Chain, now))
+                    RecordChain(count, null);
                 return;
             }
 
             if (chat.TargetKind is (XivChatRelationKind.EngagedEnemy or XivChatRelationKind.UnengagedEnemy) &&
-                text.StartsWith("You defeat ", StringComparison.Ordinal))
+                EnglishNotices.IsSelfDefeat(text) && pairing.FallbackRecords((int)ObservationKind.SelfDefeat, now))
                 observations.Record(observations.GetContext() with { Kind = ObservationKind.SelfDefeat });
             return;
         }
 
-        if (!text.StartsWith("You obtain ", StringComparison.Ordinal))
+        if (!EnglishNotices.IsLoot(text))
             return;
 
         var items = SeString.Parse(message.Data.Span).Payloads.OfType<ItemPayload>().Take(2).ToArray();
-        if (items.Length != 1 || items[0].ItemId == 0)
+        if (items.Length != 1 || items[0].ItemId == 0 || !pairing.FallbackRecords((int)ObservationKind.Loot, now))
             return;
-
-        var quantity = LootQuantity().Match(text);
-        uint? amount = quantity.Success && uint.TryParse(quantity.Groups[1].ValueSpan, NumberStyles.None,
-            CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
-        if (text.StartsWith("You obtain a ", StringComparison.Ordinal) ||
-            text.StartsWith("You obtain an ", StringComparison.Ordinal))
-            amount = 1;
 
         observations.Record(observations.GetContext() with
         {
             Kind = ObservationKind.Loot,
             GameId = items[0].ItemId,
-            Quantity = amount
+            Quantity = EnglishNotices.LootQuantity(text)
         });
     }
 
@@ -141,7 +206,7 @@ internal sealed partial class ForaySignalModule(
             if (Heartbeat.IsDue(now, lastHeartbeat))
             {
                 lastHeartbeat = now;
-                observations.Record(Heartbeat.Create(context, player.Position));
+                observations.Record(Heartbeat.Create(context, player.Position, gameVersion.Value));
             }
 
             SampleTreasure(context);
@@ -246,16 +311,18 @@ internal sealed partial class ForaySignalModule(
     {
         // Bozja and Zadnor CEs live in the Bozja director's DynamicEventContainer; the Horns use the
         // Occult Crescent director's. Same struct, so the sampling below is shared.
+        // Task 2026-11-08-1353: read-only, no game function calls. The active content director (static address) is the
+        // zone's public content director; its type field is checked before the cast.
         DynamicEventContainer* container = null;
-        if (ForayZones.IsBozja(context.TerritoryId))
-        {
-            var bozja = PublicContentBozja.GetInstance();
-            if (bozja != null)
-                container = &bozja->DynamicEventContainer;
-        }
-
-        if (container == null)
-            container = DynamicEventContainer.GetInstance();
+        var events = EventFramework.Instance();
+        var director = events == null ? null : events->DirectorModule.ActiveContentDirector;
+        if (director == null)
+            return;
+        var type = ((PublicContentDirector*)director)->Type;
+        if (ForayZones.IsBozja(context.TerritoryId) && type == PublicContentDirectorType.Bozja)
+            container = &((PublicContentBozja*)director)->DynamicEventContainer;
+        else if (ForayZones.IsOccultCrescent(context.TerritoryId) && type == PublicContentDirectorType.OccultCrescent)
+            container = &((PublicContentOccultCrescent*)director)->DynamicEventContainer;
         if (container == null)
             return;
 
@@ -307,11 +374,7 @@ internal sealed partial class ForaySignalModule(
         encounters = current;
     }
 
-    [GeneratedRegex(@"^EXP chain #([0-9]+)!", RegexOptions.CultureInvariant)]
-    private static partial Regex ChainNotice();
 
-    [GeneratedRegex(@"^You obtain ([0-9]+) ", RegexOptions.CultureInvariant)]
-    private static partial Regex LootQuantity();
 
     public void Dispose() => LoadConfig(new Configuration.Configuration());
 }

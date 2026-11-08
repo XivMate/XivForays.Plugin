@@ -10,6 +10,9 @@ namespace XivMate.DataGathering.Forays.Dalamud.Models;
 internal sealed record EnemyPose
 {
     public int PoseVersion { get; init; } = 1;
+
+    /// <summary>Capture logic revision (Core.ContextRules.CaptureRevision).</summary>
+    public int CaptureRevision { get; init; } = Core.ContextRules.CaptureRevision;
     public uint BnpcId { get; init; }
     public uint NameId { get; init; }
 
@@ -148,6 +151,7 @@ internal sealed record EnemyPose
 internal sealed record EnemyFormChange
 {
     public int PoseVersion { get; init; } = 1;
+    public int CaptureRevision { get; init; } = Core.ContextRules.CaptureRevision;
 
     /// <summary>1 model, 2 scale, 4 drawScale, 8 nameId, 16 bnpcId, 32 mutated, 64 adapted, 128 skeleton.</summary>
     public int Changed { get; init; }
@@ -167,6 +171,7 @@ internal sealed record EnemyFormChange
 internal sealed record EnemyIdleTrack
 {
     public int PoseVersion { get; init; } = 1;
+    public int CaptureRevision { get; init; } = Core.ContextRules.CaptureRevision;
     public long StartMs { get; init; }
     public int StepMs { get; init; }
 
@@ -183,6 +188,7 @@ internal sealed record EnemyIdleTrack
 internal sealed record EnemyAggro
 {
     public int PoseVersion { get; init; } = 1;
+    public int CaptureRevision { get; init; } = Core.ContextRules.CaptureRevision;
     public byte TargetCategory { get; init; }
     public float DistanceToPlayer { get; init; }
 
@@ -247,6 +253,7 @@ internal sealed record AggroLink
 internal sealed record EnemyRespawn
 {
     public int PoseVersion { get; init; } = 1;
+    public int CaptureRevision { get; init; } = Core.ContextRules.CaptureRevision;
     public Guid PreviousTrackId { get; init; }
     public long DiedAtMs { get; init; }
     public long IntervalMs { get; init; }
