@@ -21,14 +21,17 @@ internal sealed record EnemyPose
     public bool PresentAtStart { get; init; }
     public bool SeenSpawning { get; init; }
     public float PlayerDistance { get; init; }
-    /// <summary>Player within PoseRates.NearYalms (90 y since the 11:20 trial): the ground is loaded.</summary>
+    /// <summary>Player within PoseRates.NearYalms (70 y since the 11:37 trial): the ground is loaded.</summary>
     public bool CollisionLoaded { get; init; }
 
-    /// <summary>The skeleton tilt is trusted (same 90 y rule; a pose beyond it may read tilt 0 on a slope).</summary>
+    /// <summary>The skeleton tilt is trusted (same 70 y rule; a pose beyond it may read tilt 0 on a slope).</summary>
     public bool TiltTrusted { get; init; }
 
-    /// <summary>The one upgrade re-take of this spawn instance (the first pose was untrusted).</summary>
+    /// <summary>A closer re-take of this spawn instance (not its first pose). The consumer keeps the closest.</summary>
     public bool Retake { get; init; }
+
+    /// <summary>1 for the first pose of this spawn instance, 2-3 for closer re-takes.</summary>
+    public int PoseIndex { get; init; } = 1;
 
     /// <summary>Where the instance was when first seen [x, y, z] (item 3: is DefaultPosition the spawn point?).</summary>
     public float[]? FirstSeenPosition { get; init; }

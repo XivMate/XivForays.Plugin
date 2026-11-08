@@ -284,13 +284,15 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
     {
         track.Spawn.Taken(take, track.PlayerDistance);
         bool retake;
+        var index = 1;
         if (track.LayoutId != 0)
         {
-            // One pose per (layoutId, spawn instance), plus one upgrade when the first was untrusted.
-            var decision = layoutPoses.TryRecord(track.LayoutId, pose.TiltTrusted);
+            // One spawn instance per layoutId: the first pose, then closer re-takes (<= 70 y, >= 15 y closer), max 3.
+            var decision = layoutPoses.TryRecord(track.LayoutId, pose.PlayerDistance);
             if (decision == LayoutDecision.Skip)
                 return;
             retake = decision == LayoutDecision.Upgrade;
+            index = layoutPoses.PosesOf(track.LayoutId);
         }
         else
         {
@@ -299,10 +301,11 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
             if (!dedupe.TryAdd(key))
                 return;
             retake = take == PoseTake.NearRetake;
+            index = track.Spawn.Attempts;
         }
 
         track.Spawn.SettledPosition ??= track.Position;
-        Emit(Enemy(context, track, ObservationKind.EnemySpawnPose) with { Pose = pose with { Retake = retake }, FateId = pose.FateId }, record);
+        Emit(Enemy(context, track, ObservationKind.EnemySpawnPose) with { Pose = pose with { Retake = retake, PoseIndex = index }, FateId = pose.FateId }, record);
         if (CapturePass && take == PoseTake.First && track.Idle == null && !track.IdleDone && track.Npc != null)
         {
             track.Idle = new IdleTrackBuilder(nowMs, track.Position, track.Heading, pose.BaseTimeline, pose.BaseOverride);

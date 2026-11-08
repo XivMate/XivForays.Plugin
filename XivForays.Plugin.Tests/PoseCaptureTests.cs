@@ -75,22 +75,26 @@ public class PoseCaptureTests
     // ---- spawn pose decisions and dedupe ----
 
     [Fact]
-    public void OnePosePerTrackPlusAtMostOneNearRetake()
+    public void TrackReTakesOnlyWhenFifteenYalmsCloserWithinSeventyAtMostThree()
     {
         var near = new SpawnPoseState();
         Assert.Equal(PoseTake.None, near.Decide(settled: false, 50));
         Assert.Equal(PoseTake.First, near.Decide(true, 50));
         near.Taken(PoseTake.First, 50);
-        Assert.Equal(PoseTake.None, near.Decide(true, 50)); // near first pose: never retaken
+        Assert.Equal(PoseTake.None, near.Decide(true, 40)); // only 10 y closer
+        Assert.Equal(PoseTake.NearRetake, near.Decide(true, 35));
 
         var far = new SpawnPoseState();
         far.Taken(far.Decide(true, 150), 150);
-        Assert.True(far.FirstWasFar);
-        Assert.Equal(PoseTake.None, far.Decide(true, 130)); // still far
-        Assert.Equal(PoseTake.None, far.Decide(true, 100)); // 100 y is untrusted since the 11:20 trial
-        Assert.Equal(PoseTake.NearRetake, far.Decide(true, 85));
-        far.Taken(PoseTake.NearRetake, 85);
-        Assert.Equal(PoseTake.None, far.Decide(true, 50));
+        Assert.Equal(PoseTake.None, far.Decide(true, 89.2f)); // the 7f55e76 re-takes at 86-89.8 y read tilt 0
+        Assert.Equal(PoseTake.None, far.Decide(true, 71));
+        Assert.Equal(PoseTake.NearRetake, far.Decide(true, 70));
+        far.Taken(PoseTake.NearRetake, 70);
+        Assert.Equal(PoseTake.None, far.Decide(true, 56)); // 14 y closer
+        Assert.Equal(PoseTake.NearRetake, far.Decide(true, 55));
+        far.Taken(PoseTake.NearRetake, 55);
+        Assert.Equal(3, far.Attempts);
+        Assert.Equal(PoseTake.None, far.Decide(true, 10)); // three poses: done
     }
 
     [Fact]
@@ -128,42 +132,46 @@ public class PoseCaptureTests
         Assert.Equal(1, dedupe.Count);
     }
 
-    // ---- trial 11:20 fixes: trust radius and one pose per (layoutId, spawn instance) ----
+    // ---- trial fixes 11:20 / 11:37: trust radius and the poses per (layoutId, spawn instance) ----
 
     [Fact]
-    public void TiltIsTrustedOnlyWithinNinetyYalms()
+    public void TiltIsTrustedOnlyWithinSeventyYalms()
     {
-        Assert.Equal(90f, PoseRates.NearYalms);
-        var state = new SpawnPoseState();
-        state.Taken(state.Decide(true, 101), 101); // the trial's 101-117 y poses read tilt 0 on slopes
-        Assert.True(state.FirstWasFar);
-        Assert.Equal(PoseTake.NearRetake, state.Decide(true, 76));
+        Assert.Equal(70f, PoseRates.NearYalms);
+        Assert.Equal(15f, PoseRates.RetakeImproveYalms);
+        Assert.Equal(3, PoseRates.MaxPosesPerInstance);
+        Assert.False(PoseRules.CloserRetake(1, 117, 89.8f)); // beyond 70 y
+        Assert.True(PoseRules.CloserRetake(1, 117, 68)); // the trial's real tilts were at 68-76 y
+        Assert.False(PoseRules.CloserRetake(3, 117, 10));
     }
 
     [Fact]
-    public void OnePosePerLayoutInstanceAcrossTracksWithOneUpgrade()
+    public void LayoutInstanceKeepsGettingCloserPosesAcrossTracksUpToThree()
     {
         var layouts = new LayoutPoseRegistry();
-        // Walking out of range and back makes new tracks of the same instance (7269591 x3 in the trial).
-        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7269591, trusted: false)); // first seen at 110 y
-        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, trusted: false)); // back, still far
-        Assert.Equal(LayoutDecision.Upgrade, layouts.TryRecord(7269591, trusted: true)); // came within 90 y
-        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, trusted: true)); // one upgrade only
-        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, trusted: false));
+        // Walking out of range and back makes new tracks of the same instance (7269591 x3 in the 11:20 trial).
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7269591, 110)); // first seen far
+        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, 105)); // back, still far
+        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, 89.2f)); // the old 90 y edge
+        Assert.Equal(LayoutDecision.Upgrade, layouts.TryRecord(7269591, 69)); // within 70 y
+        Assert.Equal(2, layouts.PosesOf(7269591));
+        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, 60)); // 9 y closer
+        Assert.Equal(LayoutDecision.Upgrade, layouts.TryRecord(7269591, 50));
+        Assert.Equal(3, layouts.PosesOf(7269591));
+        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7269591, 5)); // three poses: done
 
-        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7083308, trusted: true)); // trusted first: done
-        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7083308, trusted: true));
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7083308, 40)); // near first pose
+        Assert.Equal(LayoutDecision.Skip, layouts.TryRecord(7083308, 30));
+        Assert.Equal(LayoutDecision.Upgrade, layouts.TryRecord(7083308, 25));
 
-        // A death of the layout ends the instance: the respawn gets a new pose.
-        layouts.Died(7083308);
-        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7083308, trusted: true));
+        // A death of the layout ends the instance: the respawn gets a new first pose.
         layouts.Died(7269591);
-        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7269591, trusted: false));
-        Assert.Equal(LayoutDecision.Upgrade, layouts.TryRecord(7269591, trusted: true));
+        Assert.Equal(0, layouts.PosesOf(7269591));
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(7269591, 100));
 
         // Layout 0 is not a key: the content dedupe decides.
-        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(0, true));
-        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(0, true));
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(0, 10));
+        Assert.Equal(LayoutDecision.Record, layouts.TryRecord(0, 10));
         Assert.Equal(2, layouts.Count);
     }
 
@@ -171,9 +179,9 @@ public class PoseCaptureTests
     public void LayoutRegistryIsBounded()
     {
         var layouts = new LayoutPoseRegistry(max: 2);
-        layouts.TryRecord(1, true);
-        layouts.TryRecord(2, true);
-        layouts.TryRecord(3, true);
+        layouts.TryRecord(1, 10);
+        layouts.TryRecord(2, 10);
+        layouts.TryRecord(3, 10);
         Assert.Equal(1, layouts.Count);
     }
 
@@ -592,7 +600,7 @@ public class PoseCaptureTests
     {
         var line = PoseLog.Line(SampleRecords().First());
         Assert.Equal("pose 15 bnpc 7777 layout 4012345 near 1 tilt 9.9 dy -0.358 form 0 start 0 spawning 1 home 1 fate 1367 dist 43.2 " +
-                     "retake 0 homeDist 0.16 firstHome 0.10 firstMoved 0.25 seenFor 2.1", line);
+                     "retake 0 n 1 homeDist 0.16 firstHome 0.10 firstMoved 0.25 seenFor 2.1", line);
         foreach (var record in SampleRecords())
             Assert.Matches("^pose [A-Za-z0-9 .:-]+$", PoseLog.Line(record));
     }

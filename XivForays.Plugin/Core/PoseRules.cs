@@ -21,11 +21,17 @@ internal static class PoseRates
     public const float StillDegrees = 1f;
 
     /// <summary>
-    /// Within this distance of the player the skeleton tilt is trusted (collisionLoaded / tiltTrusted). Trial
-    /// 2026-11-08 11:20 (Squib 8174, Anemos): tilts at 68-76 y were real (12.7, 13.5 degrees on a slope) but poses at
-    /// 101-117 y on slopes read 0, so the game does not settle at 120 y. 90 y keeps a margin under 101.
+    /// Within this distance of the player the skeleton tilt is trusted (collisionLoaded / tiltTrusted). Trials
+    /// 2026-11-08: real slope tilts at 68-76 y (12.7, 13.5 degrees), tilt 0 at 101-117 y and, after 7f55e76, tilt 0 on
+    /// re-takes at 86-89.8 y. The settle radius lies around 76-89 y, so 70 y.
     /// </summary>
-    public const float NearYalms = 90f;
+    public const float NearYalms = 70f;
+
+    /// <summary>A re-take needs the player at least this much closer than the closest pose so far.</summary>
+    public const float RetakeImproveYalms = 15f;
+
+    /// <summary>At most this many spawn poses per spawn instance (the first plus closer re-takes).</summary>
+    public const int MaxPosesPerInstance = 3;
 
     public const long FormDebounceMs = 1500;
     public const long FormMaxWaitMs = 5000;
@@ -193,12 +199,17 @@ internal enum PoseTake
     NearRetake
 }
 
-/// <summary>Spawn pose decisions per track: one pose, plus at most one near retake (design §3 "Near retake").</summary>
+/// <summary>
+/// Spawn pose decisions per track: the first settled pose, then re-takes while the player gets closer (each within
+/// 70 y and at least 15 y closer than the closest so far), at most 3 in all. The layout registry has the final say
+/// across tracks.
+/// </summary>
 internal sealed class SpawnPoseState
 {
     public int Attempts { get; private set; }
-    public bool FirstWasFar { get; private set; }
-    public bool RetakeDone { get; private set; }
+
+    /// <summary>The closest player distance of a pose attempt so far.</summary>
+    public float BestDistance { get; private set; } = float.MaxValue;
 
     /// <summary>The position of the first accepted (non-duplicate) pose, for "moved since settled".</summary>
     public Vector3? SettledPosition { get; set; }
@@ -209,23 +220,25 @@ internal sealed class SpawnPoseState
             return PoseTake.None;
         if (Attempts == 0)
             return PoseTake.First;
-        return FirstWasFar && !RetakeDone && playerDistance <= PoseRates.NearYalms ? PoseTake.NearRetake : PoseTake.None;
+        return PoseRules.CloserRetake(Attempts, BestDistance, playerDistance) ? PoseTake.NearRetake : PoseTake.None;
     }
 
-    /// <summary>Marks the decision as used, whether or not the content dedupe let the record through.</summary>
+    /// <summary>Marks the decision as used, whether or not the dedupe let the record through.</summary>
     public void Taken(PoseTake take, float playerDistance)
     {
-        if (take == PoseTake.First)
-        {
-            Attempts = 1;
-            FirstWasFar = playerDistance > PoseRates.NearYalms;
-        }
-        else if (take == PoseTake.NearRetake)
-        {
-            Attempts++;
-            RetakeDone = true;
-        }
+        if (take == PoseTake.None)
+            return;
+        Attempts++;
+        BestDistance = MathF.Min(BestDistance, playerDistance);
     }
+}
+
+internal static class PoseRules
+{
+    /// <summary>A re-take: under the pose cap, within 70 y and at least 15 y closer than the closest pose so far.</summary>
+    public static bool CloserRetake(int posesSoFar, float bestDistance, float playerDistance) =>
+        posesSoFar < PoseRates.MaxPosesPerInstance && playerDistance <= PoseRates.NearYalms &&
+        playerDistance <= bestDistance - PoseRates.RetakeImproveYalms;
 }
 
 internal enum LayoutDecision
@@ -233,21 +246,22 @@ internal enum LayoutDecision
     /// <summary>No pose yet for this spawn instance: record it.</summary>
     Record,
 
-    /// <summary>Only an untrusted (far) pose so far and this one is trusted: record it once as the upgrade re-take.</summary>
+    /// <summary>A closer re-take of this spawn instance (within 70 y, at least 15 y closer, at most 3 poses).</summary>
     Upgrade,
 
-    /// <summary>Already covered: a trusted pose, or an untrusted one and this is untrusted too (or the upgrade was used).</summary>
+    /// <summary>Already covered: not closer enough, beyond 70 y, or 3 poses already.</summary>
     Skip
 }
 
 /// <summary>
-/// Trial fix 2026-11-08-1126 item 2: ONE spawn pose per (layoutId, spawn instance) per visit, whatever the tracks do
-/// (walking out of range and back makes new tracks). At most one upgrade re-take when the first was untrusted. A
-/// death of that layout ends the instance, so its respawn gets a new pose. Layout 0 falls back to the content key.
+/// One spawn instance per (layoutId) per visit, whatever the tracks do (walking out of range and back makes new
+/// tracks). Task 2026-11-08-1137: the first pose, then re-takes as the player gets closer (within 70 y and at least
+/// 15 y closer than the closest so far), at most 3 poses; the consumer keeps the closest. A death of that layout ends
+/// the instance, so its respawn gets a new pose. Layout 0 falls back to the content key.
 /// </summary>
 internal sealed class LayoutPoseRegistry
 {
-    private readonly Dictionary<uint, (bool Trusted, bool Upgraded)> layouts = new();
+    private readonly Dictionary<uint, (int Poses, float BestDistance)> layouts = new();
     private readonly int max;
 
     public LayoutPoseRegistry(int max = PoseRates.DedupeMax) => this.max = max;
@@ -256,8 +270,11 @@ internal sealed class LayoutPoseRegistry
 
     public void Clear() => layouts.Clear();
 
-    /// <summary>Decides and, unless skipped, records the pose for this layout.</summary>
-    public LayoutDecision TryRecord(uint layoutId, bool trusted)
+    /// <summary>The poses recorded so far for this layout's instance (0 when none).</summary>
+    public int PosesOf(uint layoutId) => layouts.TryGetValue(layoutId, out var state) ? state.Poses : 0;
+
+    /// <summary>Decides and, unless skipped, records the pose for this layout at this player distance.</summary>
+    public LayoutDecision TryRecord(uint layoutId, float playerDistance)
     {
         if (layoutId == 0)
             return LayoutDecision.Record;
@@ -265,13 +282,13 @@ internal sealed class LayoutPoseRegistry
         {
             if (layouts.Count >= max)
                 layouts.Clear();
-            layouts[layoutId] = (trusted, false);
+            layouts[layoutId] = (1, playerDistance);
             return LayoutDecision.Record;
         }
 
-        if (state.Trusted || state.Upgraded || !trusted)
+        if (!PoseRules.CloserRetake(state.Poses, state.BestDistance, playerDistance))
             return LayoutDecision.Skip;
-        layouts[layoutId] = (true, true);
+        layouts[layoutId] = (state.Poses + 1, MathF.Min(state.BestDistance, playerDistance));
         return LayoutDecision.Upgrade;
     }
 
@@ -683,10 +700,10 @@ internal static class PoseLog
             case ObservationKind.EnemySpawnPose when o.Pose is { } p:
                 var dy = p.DrawPosition is { Length: 3 } d && p.Position.Length == 3 ? d[1] - p.Position[1] : 0;
                 return string.Format(inv,
-                    "pose 15 bnpc {0} layout {1} near {2} tilt {3:0.0} dy {4:0.000} form {5} start {6} spawning {7} home {8} fate {9} dist {10:0.0} retake {11} homeDist {12:0.00} firstHome {13:0.00} firstMoved {14:0.00} seenFor {15:0.0}",
+                    "pose 15 bnpc {0} layout {1} near {2} tilt {3:0.0} dy {4:0.000} form {5} start {6} spawning {7} home {8} fate {9} dist {10:0.0} retake {11} n {16} homeDist {12:0.00} firstHome {13:0.00} firstMoved {14:0.00} seenFor {15:0.0}",
                     p.BnpcId, layout, p.CollisionLoaded ? 1 : 0, p.SkeletonTilt ?? 0, dy, p.Form, p.PresentAtStart ? 1 : 0,
                     p.SeenSpawning ? 1 : 0, p.HomePosition == null ? 0 : 1, p.FateId ?? 0, p.PlayerDistance, p.Retake ? 1 : 0,
-                    p.HomeDistance ?? -1, p.FirstSeenHomeDistance ?? -1, p.FirstSeenMoved ?? -1, p.SeenForMs / 1000.0);
+                    p.HomeDistance ?? -1, p.FirstSeenHomeDistance ?? -1, p.FirstSeenMoved ?? -1, p.SeenForMs / 1000.0, p.PoseIndex);
             case ObservationKind.EnemyFormChange when o.FormChange is { } f:
                 return string.Format(inv, "pose 16 bnpc {0} layout {1} changed 0x{2:X2} dy {3:0.000} offset {4:0.000} settled {5} before {6}",
                     o.GameId ?? 0, layout, f.Changed, f.DrawHeightDelta ?? 0, f.DrawOffsetDelta ?? 0, f.AfterSettled ? 1 : 0,
