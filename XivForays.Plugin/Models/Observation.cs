@@ -131,4 +131,17 @@ internal sealed record Observation
 
     /// <summary>Kind 1: this appearance matched an earlier death of the same enemy at the same spawn point (this visit).</summary>
     public EnemyRespawn? Respawn { get; init; }
+
+    /// <summary>
+    /// Kind 1 (task 2026-11-08-1212): the same heuristic as pose.seenSpawning. HomePosition (DefaultPosition) is the
+    /// position at which the client created the object (it equals ACT's AddCombatant position), so it is the spawn
+    /// point only when the object was created at its spawn: seenSpawning, or a respawn match seen from nearby.
+    /// </summary>
+    public bool? SeenSpawning { get; init; }
+
+    /// <summary>Kind 1: first seen in the visit's first 5 s of scanning (zone-in or enable).</summary>
+    public bool? PresentAtStart { get; init; }
+
+    /// <summary>Kind 1: the player's distance to the enemy when first seen (yalms).</summary>
+    public float? FirstSeenDistance { get; init; }
 }

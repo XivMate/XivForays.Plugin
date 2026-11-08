@@ -717,8 +717,12 @@ internal static class PoseLog
                     o.GameId ?? 0, layout, a.TargetCategory, a.DistanceToPlayer, a.EnemyFacingToPlayerDeg, a.PlayerFacingToEnemyDeg,
                     a.Dy, a.Player.Moving ? 1 : 0, a.Player.Casting == null ? 0 : 1, a.Linked.Length);
             case ObservationKind.EnemyAppeared when o.Respawn is { } r:
-                return string.Format(inv, "pose respawn bnpc {0} layout {1} after {2:0.0} s by {3} anchor {4:0.00} sameForm {5} maxPlayer {6:0}",
-                    o.GameId ?? 0, layout, r.IntervalMs / 1000.0, r.MatchedBy, r.AnchorDistance, r.SameForm ? 1 : 0, r.MaxPlayerDistance);
+                return string.Format(inv, "pose respawn bnpc {0} layout {1} after {2:0.0} s by {3} anchor {4:0.00} sameForm {5} maxPlayer {6:0} spawning {7} firstDist {8:0.0}",
+                    o.GameId ?? 0, layout, r.IntervalMs / 1000.0, r.MatchedBy, r.AnchorDistance, r.SameForm ? 1 : 0, r.MaxPlayerDistance,
+                    o.SeenSpawning == true ? 1 : 0, o.FirstSeenDistance ?? -1);
+            case ObservationKind.EnemyAppeared when o.SeenSpawning == true:
+                return string.Format(inv, "pose spawnpoint bnpc {0} layout {1} firstDist {2:0.0}", o.GameId ?? 0, layout,
+                    o.FirstSeenDistance ?? -1);
             case ObservationKind.EnemyDied:
                 return string.Format(inv, "pose died bnpc {0} layout {1} claim {2} type {3} lastTarget {4} fate {5}",
                     o.GameId ?? 0, layout, o.Claim ?? 0, o.ClaimType ?? 0, o.LastTargetCategory ?? 0, o.FateId ?? 0);

@@ -61,7 +61,7 @@ internal class DebugTab(
             $"Poses this visit: spawn {poseCapture.CountOf(ObservationKind.EnemySpawnPose)}, " +
             $"form {poseCapture.CountOf(ObservationKind.EnemyFormChange)}, idle {poseCapture.CountOf(ObservationKind.EnemyIdleTrack)}, " +
             $"aggro {poseCapture.CountOf(ObservationKind.EnemyAggro)}, died {poseCapture.CountOf(ObservationKind.EnemyDied)}, " +
-            $"respawns {poseCapture.RespawnCount}");
+            $"respawns {poseCapture.RespawnCount}, spawn points seen {poseCapture.SpawnPointCount}");
         ImGui.TextUnformatted(
             $"Tracked {poseCapture.TrackedCount}, dedupe keys {poseCapture.DedupeCount}, pending deaths {poseCapture.PendingDeaths}, " +
             $"full reads last scan {poseCapture.LastScanFullReads}, dropped non-finite {poseCapture.DroppedNonFinite}, " +

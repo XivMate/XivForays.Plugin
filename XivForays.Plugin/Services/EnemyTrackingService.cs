@@ -130,14 +130,18 @@ public sealed class EnemyTrackingService(
             nextRecorded[id] = hasLast ? last : here;
             if (previous == null)
             {
+                var flags = poseCapture.SpawnFlags(id, current.Id);
                 var appeared = ToObservation(current, context, ObservationKind.EnemyAppeared) with
                 {
                     Respawn = poseCapture.Appeared(current.Position.MobIngameId, current.LayoutId,
-                        current.Home ?? current.FirstPosition, PoseMath.Form(current.Position.IsMutated, current.Position.IsAdapted))
+                        current.Home ?? current.FirstPosition, PoseMath.Form(current.Position.IsMutated, current.Position.IsAdapted)),
+                    SeenSpawning = flags?.SeenSpawning,
+                    PresentAtStart = flags?.PresentAtStart,
+                    FirstSeenDistance = flags?.FirstSeenDistance
                 };
                 record(appeared);
-                if (appeared.Respawn != null)
-                    poseCapture.Note(appeared);
+                if (appeared.Respawn != null || appeared.SeenSpawning == true)
+                    poseCapture.SpawnPointSeen(appeared);
                 nextRecorded[id] = here;
             }
             else if (periodicSample || previous.ForayLevel != current.ForayLevel ||

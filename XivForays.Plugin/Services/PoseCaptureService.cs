@@ -85,6 +85,7 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
         categories.Clear();
         Array.Clear(countsByKind);
         RespawnCount = 0;
+        SpawnPointCount = 0;
         lock (recent)
             recent.Clear();
         visitId = Guid.Empty;
@@ -110,6 +111,21 @@ public sealed class PoseCaptureService(IObjectTable objectTable, IPartyList part
         playerInCombat = (local.StatusFlags & StatusFlags.InCombat) != 0;
         playerHistory.Add(nowMs, player);
         respawns.Tick(nowMs, player);
+    }
+
+    internal int SpawnPointCount { get; private set; }
+
+    /// <summary>Kind 1: the spawn flags of the track <see cref="Observe"/> created for this object this scan.</summary>
+    internal (bool PresentAtStart, bool SeenSpawning, float FirstSeenDistance)? SpawnFlags(ulong gameObjectId, Guid trackId) =>
+        tracks.TryGetValue(gameObjectId, out var track) && track.TrackId == trackId
+            ? (track.PresentAtStart, track.SeenSpawning, PoseMath.R2(track.FirstSeenDistance))
+            : null;
+
+    /// <summary>Kind 1 seen at its spawn (seenSpawning or a respawn match): its homePosition is a spawn point.</summary>
+    internal void SpawnPointSeen(Observation appeared)
+    {
+        SpawnPointCount++;
+        Note(appeared);
     }
 
     /// <summary>Kind 1: the respawn match for a new appearance, if any (consumes the matched death).</summary>

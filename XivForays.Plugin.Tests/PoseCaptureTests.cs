@@ -529,6 +529,7 @@ public class PoseCaptureTests
         yield return context with
         {
             Kind = ObservationKind.EnemyAppeared, GameId = 7777, EnemyTrackId = track, LayoutId = 4012345, FateId = 1367,
+            SeenSpawning = true, PresentAtStart = false, FirstSeenDistance = 43.5f,
             HomePosition = [1, 2, 3], Respawn = new EnemyRespawn { PreviousTrackId = Guid.NewGuid(), IntervalMs = 60_000, MatchedBy = 3 }
         };
         yield return context with
@@ -593,6 +594,27 @@ public class PoseCaptureTests
         Assert.Equal(4012345u, spawn.GetProperty("layoutId").GetUInt32());
         Assert.Equal(9.9f, spawn.GetProperty("pose").GetProperty("skeletonTilt").GetSingle());
         Assert.False(spawn.GetProperty("pose").TryGetProperty("equipment", out _)); // null omitted
+    }
+
+    [Fact]
+    public void AppearedRecordsCarryTheSpawnFlagsAndLogSpawnPoints()
+    {
+        var appeared = SampleRecords().Single(o => o.Kind == ObservationKind.EnemyAppeared);
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(appeared, ObservationJson.Options));
+        Assert.True(document.RootElement.GetProperty("seenSpawning").GetBoolean());
+        Assert.False(document.RootElement.GetProperty("presentAtStart").GetBoolean());
+        Assert.Equal(43.5f, document.RootElement.GetProperty("firstSeenDistance").GetSingle());
+        Assert.Equal(new[] { 1f, 2f, 3f }, document.RootElement.GetProperty("homePosition").EnumerateArray().Select(e => e.GetSingle()));
+
+        Assert.StartsWith("pose respawn bnpc 7777 layout 4012345 after 60.0 s by 3", PoseLog.Line(appeared));
+        Assert.EndsWith("spawning 1 firstDist 43.5", PoseLog.Line(appeared));
+        var spawnOnly = appeared with { Respawn = null };
+        Assert.Equal("pose spawnpoint bnpc 7777 layout 4012345 firstDist 43.5", PoseLog.Line(spawnOnly));
+
+        // A plain walk-in appearance: no flags set, nothing new on the wire.
+        var walkIn = new Observation { Kind = ObservationKind.EnemyAppeared, GameId = 1, LayoutId = 2 };
+        using var plain = JsonDocument.Parse(JsonSerializer.Serialize(walkIn, ObservationJson.Options));
+        Assert.False(plain.RootElement.TryGetProperty("seenSpawning", out _));
     }
 
     [Fact]
