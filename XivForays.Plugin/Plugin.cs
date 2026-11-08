@@ -142,6 +142,7 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton<TerritoryService>();
         services.AddSingleton<ApiService>();
         services.AddSingleton<PoseCaptureService>();
+        services.AddSingleton<PlayerContextSampler>();
         services.AddSingleton<EnemyTrackingService>();
         services.AddSingleton<EnemyLocationGatherer>();
         services.AddSingleton<ForayService>();

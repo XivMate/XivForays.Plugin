@@ -33,7 +33,10 @@ internal enum ObservationKind
     EnemyIdleTrack = 17,
 
     /// <summary>Pose capture v2: an enemy's out-of-combat to in-combat edge, with the local player's state (categories only).</summary>
-    EnemyAggro = 18
+    EnemyAggro = 18,
+
+    /// <summary>The local player's foray context (levels, magia board, chain, group jobs, allow-listed statuses, instance).</summary>
+    PlayerContext = 19
 }
 
 /// <summary>FATE result on FateEnded: from the end state (Ended/Failed), else from the last progress (100 = success).</summary>
@@ -144,4 +147,7 @@ internal sealed record Observation
 
     /// <summary>Kind 1: the player's distance to the enemy when first seen (yalms).</summary>
     public float? FirstSeenDistance { get; init; }
+
+    /// <summary>Kind 19.</summary>
+    public PlayerContext? Situation { get; init; }
 }

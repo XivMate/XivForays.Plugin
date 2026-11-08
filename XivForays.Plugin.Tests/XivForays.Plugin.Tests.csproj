@@ -27,6 +27,7 @@
         <Compile Include="..\XivForays.Plugin\Core\*.cs" Link="Plugin\Core\%(Filename)%(Extension)" />
         <Compile Include="..\XivForays.Plugin\Models\Observation.cs" Link="Plugin\Models\Observation.cs" />
         <Compile Include="..\XivForays.Plugin\Models\PoseRecords.cs" Link="Plugin\Models\PoseRecords.cs" />
+        <Compile Include="..\XivForays.Plugin\Models\PlayerContext.cs" Link="Plugin\Models\PlayerContext.cs" />
     </ItemGroup>
 
     <ItemGroup Condition="Exists('$(LuminaDir)Lumina.dll') And Exists('$(LuminaDir)Lumina.Excel.dll')">

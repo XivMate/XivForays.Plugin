@@ -37,6 +37,9 @@ public class PayloadPrivacyTests
     [InlineData(typeof(AggroPlayer))]
     [InlineData(typeof(AggroLink))]
     [InlineData(typeof(EnemyRespawn))]
+    [InlineData(typeof(PlayerContext))]
+    [InlineData(typeof(EurekaContext))]
+    [InlineData(typeof(OccultContext))]
     public void UploadTypesHaveNoTextFields(Type type) => AssertNoTextFields(type, new HashSet<Type>());
 
     // Walks the upload type and every nested record: only numbers, bools, enums, Guids (random track/visit ids) and
@@ -136,6 +139,7 @@ public class PayloadPrivacyTests
         Assert.Equal(16, (int)ObservationKind.EnemyFormChange);
         Assert.Equal(17, (int)ObservationKind.EnemyIdleTrack);
         Assert.Equal(18, (int)ObservationKind.EnemyAggro);
-        Assert.Equal(Enumerable.Range(1, 18), Enum.GetValues<ObservationKind>().Select(k => (int)k));
+        Assert.Equal(19, (int)ObservationKind.PlayerContext);
+        Assert.Equal(Enumerable.Range(1, 19), Enum.GetValues<ObservationKind>().Select(k => (int)k));
     }
 }

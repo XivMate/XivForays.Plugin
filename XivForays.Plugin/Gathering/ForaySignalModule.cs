@@ -27,6 +27,7 @@ internal sealed partial class ForaySignalModule(
     IDataManager data,
     ForayService forayService,
     ObservationService observations,
+    PlayerContextSampler playerContext,
     SchedulerService scheduler,
     IPluginLog log) : IModule
 {
@@ -55,6 +56,7 @@ internal sealed partial class ForaySignalModule(
             treasures.Clear();
             encounters.Clear();
             lastHeartbeat = 0;
+            playerContext.Reset();
         }
     }
 
@@ -80,7 +82,9 @@ internal sealed partial class ForaySignalModule(
             if (chain.Success && uint.TryParse(chain.Groups[1].ValueSpan, NumberStyles.None,
                     CultureInfo.InvariantCulture, out var count))
             {
-                observations.Record(observations.GetContext() with { Kind = ObservationKind.Chain, ChainNumber = count });
+                var chainRecord = observations.GetContext() with { Kind = ObservationKind.Chain, ChainNumber = count };
+                observations.Record(chainRecord);
+                playerContext.NoteChain(count, chainRecord.ObservedAtMs);
                 return;
             }
 
@@ -143,6 +147,8 @@ internal sealed partial class ForaySignalModule(
             SampleTreasure(context);
             if (ForayZones.HasCriticalEngagements(context.TerritoryId))
                 SampleEncounters(context);
+            // Kind 19 player context: on change (at most every 5 s) or every 60 s.
+            playerContext.Tick(context, observations.Record);
         }
         catch (Exception ex)
         {

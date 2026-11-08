@@ -12,7 +12,8 @@ namespace XivMate.DataGathering.Forays.Dalamud.Windows.Tabs;
 internal class DebugTab(
     FateModule fateModule,
     EnemyTrackingService enemyTrackingService,
-    PoseCaptureService poseCapture) : ITab
+    PoseCaptureService poseCapture,
+    PlayerContextSampler playerContext) : ITab
 {
     private bool Debug;
 
@@ -62,6 +63,7 @@ internal class DebugTab(
             $"form {poseCapture.CountOf(ObservationKind.EnemyFormChange)}, idle {poseCapture.CountOf(ObservationKind.EnemyIdleTrack)}, " +
             $"aggro {poseCapture.CountOf(ObservationKind.EnemyAggro)}, died {poseCapture.CountOf(ObservationKind.EnemyDied)}, " +
             $"respawns {poseCapture.RespawnCount}, spawn points seen {poseCapture.SpawnPointCount}");
+        ImGui.TextUnformatted($"Player context records {playerContext.Recorded}: {playerContext.LastLine}");
         ImGui.TextUnformatted(
             $"Tracked {poseCapture.TrackedCount}, dedupe keys {poseCapture.DedupeCount}, pending deaths {poseCapture.PendingDeaths}, " +
             $"full reads last scan {poseCapture.LastScanFullReads}, dropped non-finite {poseCapture.DroppedNonFinite}, " +
