@@ -2,6 +2,7 @@
 
 XivMate Foray Data Gathering only records while **Crowdsource data** is ticked, and only inside Eureka, Bozja,
 Zadnor, Delubrum and Occult Crescent. Outside those zones it does nothing.
+Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occult Crescent (all ticked by default); nothing is recorded or sent while you are in an unticked area.
 
 ## What it sends
 

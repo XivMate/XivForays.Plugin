@@ -45,6 +45,15 @@ internal static class ForayZones
 
     public static bool IsOccultCrescent(uint territory) => territory is SouthHorn or NorthHorn;
 
+    /// <summary>
+    /// The per-content recording toggle for <paramref name="territory"/>: Eureka (the 4 Eureka zones), Bozja (Southern
+    /// Front, Zadnor, Delubrum Reginae and Savage) or Occult Crescent (South and North Horn). False outside the gate.
+    /// </summary>
+    public static bool IsContentEnabled(uint territory, bool eureka, bool bozja, bool occultCrescent) =>
+        IsEureka(territory) ? eureka :
+        IsBozja(territory) ? bozja :
+        IsOccultCrescent(territory) && occultCrescent;
+
     /// <summary>Zones whose critical engagements come from a DynamicEventContainer (Bozja field zones and the Horns).</summary>
     public static bool HasCriticalEngagements(uint territory) =>
         territory is BozjanSouthernFront or Zadnor || IsOccultCrescent(territory);

@@ -60,8 +60,13 @@ internal sealed class FateModule(
 
         if (visitId != forayService.VisitId)
         {
-            // Left the zone/instance: FateDisappeared (not FateEnded) for anything still tracked.
-            lifecycle.LeaveVisit(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), observations.Record);
+            // Left the zone/instance: FateDisappeared (not FateEnded) for anything still tracked, in the old zone's
+            // context, so it is only recorded while that zone's content is still ticked (the per-content toggle).
+            lifecycle.LeaveVisit(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), observation =>
+            {
+                if (forayService.IsContentEnabled(observation.TerritoryId))
+                    observations.Record(observation);
+            });
             legacy.Clear();
             visitId = forayService.VisitId;
         }
