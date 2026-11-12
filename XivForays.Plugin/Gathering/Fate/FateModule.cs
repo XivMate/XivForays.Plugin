@@ -18,7 +18,8 @@ internal sealed class FateModule(
     IPluginLog log,
     ApiService api,
     ForayService forayService,
-    ObservationService observations) : IModule
+    ObservationService observations,
+    FateRewardWindow fateRewards) : IModule
 {
     private readonly FateLifecycle lifecycle = new();
     // Legacy FATE-end route records (name, level) for the FATEs the lifecycle is tracking.
@@ -60,8 +61,13 @@ internal sealed class FateModule(
 
         if (visitId != forayService.VisitId)
         {
-            // Left the zone/instance: FateDisappeared (not FateEnded) for anything still tracked.
-            lifecycle.LeaveVisit(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), observations.Record);
+            // Left the zone/instance: FateDisappeared (not FateEnded) for anything still tracked, in the old zone's
+            // context, so it is only recorded while that zone's content is still ticked (the per-content toggle).
+            lifecycle.LeaveVisit(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), observation =>
+            {
+                if (forayService.IsContentEnabled(observation.TerritoryId))
+                    observations.Record(observation);
+            });
             legacy.Clear();
             visitId = forayService.VisitId;
         }
@@ -96,6 +102,7 @@ internal sealed class FateModule(
                 fate.Position.X, fate.Position.Y, fate.Position.Z, fate.Radius));
         }
 
+        fateRewards.Observe(context.VisitId, snapshots, context.ObservedAtMs);
         lifecycle.Sample(context, snapshots, observation =>
         {
             observations.Record(observation);

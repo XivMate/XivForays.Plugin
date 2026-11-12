@@ -16,13 +16,15 @@ namespace XivMate.DataGathering.Forays.Dalamud.Services;
 
 public sealed class EnemyTrackingService(
     IObjectTable objectTable, IDataManager dataManager, ForayService forayService, IClientState clientState,
-    PoseCaptureService poseCapture)
+    PoseCaptureService poseCapture, PlayerContextSampler playerContext)
 {
     private readonly Lazy<HashSet<uint>> adaptationIds = new(() => FindStatuses(dataManager, "Adaptation", "Adaption"));
     private readonly Lazy<HashSet<uint>> mutationIds = new(() => FindStatuses(dataManager, "Mutation"));
     private Dictionary<ulong, TrackedEnemy> tracked = new();
     // Position of each enemy's last appear/sample record, for the movement threshold.
     private Dictionary<ulong, (float X, float Y, float Z)> lastRecorded = new();
+    // Tracks already named by a defeat notice, so two notices never name the same death.
+    private readonly HashSet<Guid> defeatLinked = new();
     private Guid visitId;
 
     public bool IsInRecordableTerritory() => forayService.IsInRecordableTerritory() && objectTable.LocalPlayer != null;
@@ -50,6 +52,7 @@ public sealed class EnemyTrackingService(
     {
         tracked.Clear();
         lastRecorded.Clear();
+        defeatLinked.Clear();
         poseCapture.Reset();
     }
 
@@ -99,18 +102,23 @@ public sealed class EnemyTrackingService(
 
             var current = Read(enemy, context.VisitId, context.TerritoryId, context.MapId,
                 context.ObservedAtMs / 1000, previous);
+            if (current.IsDead)
+                current = current with { DiedAtMs = previous is { IsDead: true } ? previous.DiedAtMs : context.ObservedAtMs };
             next[id] = current;
             if (current.IsDead)
             {
                 if (previous is { IsDead: false })
                 {
+                    var chain = playerContext.ChainAt(context.ObservedAtMs);
                     var (claim, claimType, lastTarget) = poseCapture.Died(enemy, current.Id, current.LayoutId,
                         current.Home ?? current.FirstPosition, PoseMath.Form(current.Position.IsMutated, current.Position.IsAdapted));
                     var died = ToObservation(current, context, ObservationKind.EnemyDied) with
                     {
                         Claim = claim,
                         ClaimType = claimType,
-                        LastTargetCategory = lastTarget
+                        LastTargetCategory = lastTarget,
+                        ChainNumber = chain.Number,
+                        ChainAgeMs = chain.AgeMs
                     };
                     record(died);
                     poseCapture.Note(died);
@@ -162,9 +170,60 @@ public sealed class EnemyTrackingService(
         }
 
         poseCapture.EndScan(context, record);
+        var liveTracks = next.Values.Select(enemy => enemy.Id).ToHashSet();
+        defeatLinked.RemoveWhere(trackId => !liveTracks.Contains(trackId));
         tracked = next;
         lastRecorded = nextRecorded;
         return snapshot;
+    }
+
+    /// <summary>
+    /// The enemy a defeat notice (kind 13) is about: an enemy with HP 0 now that the tracker knows, not named by an
+    /// earlier notice, chosen by <see cref="DefeatMatch"/>. Returns the record with the enemy fields filled, or null
+    /// when no enemy was found (yet). Framework thread only (the notice and the scan both run there).
+    /// </summary>
+    internal Observation? IdentifyDefeat(Observation defeat, uint? nameId, bool finalAttempt, long nowMs)
+    {
+        if (visitId != defeat.VisitId)
+            return finalAttempt ? defeat with { EnemyMatch = (byte)EnemyMatch.None } : null;
+        var player = objectTable.LocalPlayer;
+        var candidates = new List<DefeatCandidate>();
+        var found = new List<(IBattleNpc Enemy, TrackedEnemy Track)>();
+        foreach (var enemy in objectTable.OfType<IBattleNpc>())
+        {
+            if (!IsEnemy(enemy) || enemy.CurrentHp != 0 || !tracked.TryGetValue(enemy.GameObjectId, out var track) ||
+                track.Position.MobIngameId != enemy.BaseId || defeatLinked.Contains(track.Id))
+                continue;
+            var distance = player == null ? 0 : Vector3.Distance(player.Position, enemy.Position);
+            candidates.Add(new DefeatCandidate(found.Count, nameId is { } name && enemy.NameId == name, !track.IsDead,
+                track.DiedAtMs, distance));
+            found.Add((enemy, track));
+        }
+
+        if (DefeatMatch.Choose(candidates, nameId != null, finalAttempt, nowMs) is not { } choice)
+            return finalAttempt ? defeat with { EnemyMatch = (byte)EnemyMatch.None } : null;
+
+        var (target, chosen) = found[choice.Index];
+        defeatLinked.Add(chosen.Id);
+        var form = PoseMath.Form(chosen.Position.IsMutated, chosen.Position.IsAdapted);
+        return defeat with
+        {
+            EnemyTrackId = chosen.Id,
+            GameId = chosen.Position.MobIngameId,
+            LayoutId = chosen.LayoutId == 0 ? null : chosen.LayoutId,
+            FateId = chosen.FateId == 0 ? null : chosen.FateId,
+            Form = form,
+            IsMutated = chosen.Position.IsMutated,
+            IsAdapted = chosen.Position.IsAdapted,
+            EnemyElementalLevel = ForayService.IsEureka(defeat.TerritoryId) ? chosen.ForayLevel : null,
+            EnemyKnowledgeLevel = ForayService.IsOccultCrescent(defeat.TerritoryId) ? chosen.ForayLevel : null,
+            EnemyCombatLevel = chosen.CombatLevel,
+            X = target.Position.X,
+            Y = target.Position.Y,
+            Z = target.Position.Z,
+            EnemyMatch = (byte)choice.Match,
+            EnemyCandidates = choice.Candidates
+        };
     }
 
     private static bool IsEnemy(IBattleNpc enemy) =>
@@ -255,5 +314,9 @@ public sealed class EnemyTrackingService(
 
     private sealed record TrackedEnemy(Guid Id, EnemyPosition Position, bool IsDead, byte CombatLevel,
         byte? ForayLevel, byte ElementId, int? ModelCharaId, float? ModelScale, uint LayoutId, ushort FateId,
-        Vector3? Home, Vector3 FirstPosition);
+        Vector3? Home, Vector3 FirstPosition)
+    {
+        /// <summary>The scan time (Unix ms) at which the tracker first saw this enemy dead.</summary>
+        public long? DiedAtMs { get; init; }
+    }
 }

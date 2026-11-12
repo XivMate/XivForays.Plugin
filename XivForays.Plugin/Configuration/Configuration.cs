@@ -7,7 +7,7 @@ namespace XivMate.DataGathering.Forays.Dalamud.Configuration;
 /// Main plugin configuration
 /// </summary>
 [Serializable]
-public class Configuration : IPluginConfiguration
+public partial class Configuration : IPluginConfiguration
 {
     /// <summary>
     /// Configuration version

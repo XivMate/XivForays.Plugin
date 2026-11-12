@@ -62,6 +62,19 @@ public sealed class PlayerContextSampler(IObjectTable objectTable, IPartyList pa
         lastChainAtMs = atMs;
     }
 
+    /// <summary>
+    /// The player's chain now (kinds 3 and 9): the last chain notice number while the UIState chain timer runs, 0 when
+    /// no chain runs (see <see cref="ChainNow"/>).
+    /// </summary>
+    internal unsafe (uint? Number, uint? AgeMs) ChainAt(long nowMs)
+    {
+        var ui = UIState.Instance();
+        if (ui == null)
+            return (null, null);
+        var remaining = ui->Chain.RemainingTime;
+        return ChainNow.At(lastChain, lastChainAtMs, float.IsFinite(remaining) && remaining > 0, nowMs);
+    }
+
     internal void Tick(Observation context, Action<Observation> record)
     {
         if (visitId != context.VisitId)

@@ -28,6 +28,8 @@
         <Compile Include="..\XivForays.Plugin\Models\Observation.cs" Link="Plugin\Models\Observation.cs" />
         <Compile Include="..\XivForays.Plugin\Models\PoseRecords.cs" Link="Plugin\Models\PoseRecords.cs" />
         <Compile Include="..\XivForays.Plugin\Models\PlayerContext.cs" Link="Plugin\Models\PlayerContext.cs" />
+        <!-- Only the dependency-free part of the plugin Configuration (the per-content recording toggles). -->
+        <Compile Include="..\XivForays.Plugin\Configuration\Configuration.Recording.cs" Link="Plugin\Configuration\Configuration.Recording.cs" />
     </ItemGroup>
 
     <ItemGroup Condition="Exists('$(LuminaDir)Lumina.dll') And Exists('$(LuminaDir)Lumina.Excel.dll')">
@@ -40,5 +42,7 @@
         <PackageReference Include="xunit" Version="2.9.3" />
         <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" PrivateAssets="all" />
         <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
+        <!-- Dalamud saves plugin configs with Newtonsoft.Json: the default-true load test reads a 0.0.0.14 config with it. -->
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     </ItemGroup>
 </Project>

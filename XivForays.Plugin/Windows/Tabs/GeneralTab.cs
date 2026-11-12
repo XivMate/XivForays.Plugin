@@ -28,6 +28,38 @@ internal class GeneralTab(
             plugin.ReloadModules();
         }
 
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Record in");
+        var changed = false;
+        var recordEureka = configuration.RecordEureka;
+        if (ImGui.Checkbox("Eureka##RecordEureka", ref recordEureka))
+        {
+            configuration.RecordEureka = recordEureka;
+            changed = true;
+        }
+
+        var recordBozja = configuration.RecordBozja;
+        if (ImGui.Checkbox("Bozja (incl. Zadnor, Delubrum)##RecordBozja", ref recordBozja))
+        {
+            configuration.RecordBozja = recordBozja;
+            changed = true;
+        }
+
+        var recordOccultCrescent = configuration.RecordOccultCrescent;
+        if (ImGui.Checkbox("Occult Crescent##RecordOccultCrescent", ref recordOccultCrescent))
+        {
+            configuration.RecordOccultCrescent = recordOccultCrescent;
+            changed = true;
+        }
+
+        // The zone gate reads these live, so no module reload is needed.
+        if (changed)
+            configuration.Save();
+
+        if (configuration.RecordsNothing)
+            ImGui.TextUnformatted("All areas are unticked: nothing will be recorded.");
+
+        ImGui.Spacing();
         if (!configuration.CanCrowdsourceData)
         {
             return;

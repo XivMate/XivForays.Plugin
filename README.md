@@ -21,7 +21,7 @@ The URL becomes available once Jake publishes the first Friends release. Dalamud
 
 ## Privacy: exactly what is sent
 
-Sharing is off on a fresh install. Nothing is read or sent outside these zones, by territory ID in any client language: Eureka Anemos/Pagos/Pyros/Hydatos incl. the Baldesion Arsenal, Bozjan Southern Front incl. Castrum Lacus Litore, Zadnor incl. the Dalriada, Delubrum Reginae (normal and Savage), and the Occult Crescent South/North Horn incl. the Forked Tower. Eureka Orthos is not included. Inside them, with **Crowdsource data** on, the plugin sends:
+Sharing is off on a fresh install. Nothing is read or sent outside these zones, by territory ID in any client language: Eureka Anemos/Pagos/Pyros/Hydatos incl. the Baldesion Arsenal, Bozjan Southern Front incl. Castrum Lacus Litore, Zadnor incl. the Dalriada, Delubrum Reginae (normal and Savage), and the Occult Crescent South/North Horn incl. the Forked Tower. Eureka Orthos is not included. Under **Record in** (General tab) you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occult Crescent; all are ticked by default, and nothing is recorded or sent while you are in an unticked area. Inside the ticked zones, with **Crowdsource data** on, the plugin sends:
 
 | What | Fields |
 | --- | --- |
@@ -33,7 +33,7 @@ Sharing is off on a fresh install. Nothing is read or sent outside these zones, 
 | FATEs | FATE ID, game-defined FATE name (legacy route), centre, radius, start time, progress, state |
 | Critical engagements (Bozja, Zadnor, Occult Crescent) | encounter ID, state, progress, start time, seconds left, marker position and radius |
 | Coffers, bunnies, pots, carrots | game object ID, kind, grade when known, position |
-| Your own loot, EXP chain and defeat notices (any client language) | item ID and quantity, chain number, or "you defeated an enemy". Numbers only; the notice text is discarded |
+| Your own loot, EXP chain and defeat notices, and your party's defeat notices (any client language) | item ID and quantity, chain number, which monster was defeated (game ids) and whether by you or by a party member (category only, never which member), which kill a drop or chain followed, and whether a FATE had just finished. Numbers only; the notice text is discarded |
 
 Every upload carries the plugin version and the API key you entered (to authenticate). The server stores the key with legacy enemy/FATE records and a SHA-256 of it with the newer records. The server also sees your IP address as part of normal web traffic.
 

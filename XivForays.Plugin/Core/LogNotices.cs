@@ -43,6 +43,23 @@ internal static class LogNotices
     public static bool SelfDefeat(uint rowId, bool sourceIsLocalPlayer, bool targetIsPlayer) =>
         rowId == DefeatRow && sourceIsLocalPlayer && !targetIsPlayer;
 
+    /// <summary>
+    /// Row 557 with a non-player target: 1 when the source is the local player, 2 when it is a member of the local
+    /// player's party, else null (other players' kills are not recorded). Who the party member is never leaves this
+    /// check.
+    /// </summary>
+    public static byte? DefeatBy(uint rowId, bool sourceIsLocalPlayer, bool sourceIsPartyMember, bool targetIsPlayer)
+    {
+        if (rowId != DefeatRow || targetIsPlayer)
+            return null;
+        if (sourceIsLocalPlayer)
+            return (byte)ObjectCategory.Self;
+        return sourceIsPartyMember ? (byte)ObjectCategory.Party : null;
+    }
+
+    /// <summary>The BNpcName row of a notice's non-player entity: ObjStr ids below 1,000,000 are BNpcName rows.</summary>
+    public static uint? EnemyNameId(uint objStrId) => objStrId is > 0 and < 1_000_000 ? objStrId : null;
+
     /// <summary>The game version string ("2025.10.01.0000.0000") as a number (2025100100000000); null if malformed.</summary>
     public static long? GameVersionNumber(string? version)
     {
