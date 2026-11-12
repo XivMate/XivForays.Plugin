@@ -13,9 +13,11 @@ internal static class ContextRules
     /// <summary>
     /// Capture logic revision, sent on every pose and context record. 1 = pose capture v2 + context; 2 = release 0.0.0.13
     /// (70 y tilt trust, closer re-takes, language-independent notices, legacy snapshots off); 3 = release 0.0.0.14
-    /// (group rows carry each member's foray level, effective level and sync flag). Bump on any capture change.
+    /// (group rows carry each member's foray level, effective level and sync flag); 4 = release 0.0.0.15 (drop
+    /// linking: defeat notices name the enemy, party defeats, loot and chain carry the defeat link, kind 3 the chain,
+    /// FATE reward guard, heartbeat lootListening). Bump on any capture change.
     /// </summary>
-    public const int CaptureRevision = 3;
+    public const int CaptureRevision = 4;
 
     /// <summary>A change is recorded at most this often.</summary>
     public const long MinChangeMs = 5000;

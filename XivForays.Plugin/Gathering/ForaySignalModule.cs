@@ -26,19 +26,28 @@ internal sealed partial class ForaySignalModule(
     IFramework framework,
     IObjectTable objects,
     IDataManager data,
+    IPartyList partyList,
+    IFateTable fateTable,
     ForayService forayService,
     ObservationService observations,
     PlayerContextSampler playerContext,
+    EnemyTrackingService enemies,
+    FateRewardWindow fateRewards,
     SchedulerService scheduler,
     IPluginLog log) : IModule
 {
+    /// <summary>How often an unresolved defeat notice looks for its enemy again.</summary>
+    private const int DefeatResolveMs = 100;
+
     private readonly NoticePairing pairing = new();
+    private readonly DropLinker linker = new();
     private readonly Lazy<long?> gameVersion = new(() =>
         LogNotices.GameVersionNumber(data.GameData.Repositories.TryGetValue("ffxiv", out var repo) ? repo.Version : null));
     private Dictionary<ulong, (uint BaseId, Vector3 Position)> treasures = new();
     private Dictionary<ushort, Observation> encounters = new();
     private Guid visitId;
     private long lastHeartbeat;
+    private bool lootListening;
 
     public bool Enabled { get; private set; }
 
@@ -52,14 +61,20 @@ internal sealed partial class ForaySignalModule(
         {
             chatGui.ChatMessage += OnGameNotice;
             chatGui.LogMessage += OnLogMessage;
+            lootListening = true;
             scheduler.ScheduleOnFrameworkThread(SignalTick, StreamRates.SignalScanMs);
+            scheduler.ScheduleOnFrameworkThread(ResolveTick, DefeatResolveMs);
         }
         else
         {
             chatGui.ChatMessage -= OnGameNotice;
             chatGui.LogMessage -= OnLogMessage;
+            lootListening = false;
             pairing.Clear();
+            linker.Clear();
+            fateRewards.Clear();
             scheduler.CancelScheduledTask(SignalTick);
+            scheduler.CancelScheduledTask(ResolveTick);
             treasures.Clear();
             encounters.Clear();
             lastHeartbeat = 0;
@@ -94,10 +109,7 @@ internal sealed partial class ForaySignalModule(
             if (LogNotices.Loot(row, Int) is { } loot)
             {
                 pairing.Structured((int)ObservationKind.Loot, now);
-                observations.Record(observations.GetContext() with
-                {
-                    Kind = ObservationKind.Loot, GameId = loot.ItemId, Quantity = loot.Quantity
-                });
+                RecordLoot(loot.ItemId, loot.Quantity, row, player.Position);
                 return;
             }
 
@@ -107,11 +119,14 @@ internal sealed partial class ForaySignalModule(
                 var target = message.TargetEntity;
                 var self = source is { IsPlayer: true } && source.HomeWorldId == player.HomeWorld.RowId &&
                            source.Name.ExtractText() == player.Name.TextValue;
-                if (LogNotices.SelfDefeat(row, self, target?.IsPlayer ?? true))
-                {
+                // The party member is compared here in memory only; the record carries the category.
+                var party = !self && source is { IsPlayer: true } && IsPartyMember(source);
+                var by = LogNotices.DefeatBy(row, self, party, target?.IsPlayer ?? true);
+                if (by == null)
+                    return;
+                if (by == (byte)ObjectCategory.Self)
                     pairing.Structured((int)ObservationKind.SelfDefeat, now);
-                    observations.Record(observations.GetContext() with { Kind = ObservationKind.SelfDefeat });
-                }
+                RecordDefeat(by.Value, target == null ? null : LogNotices.EnemyNameId(target.ObjStrId));
             }
         }
         catch (Exception ex)
@@ -126,8 +141,76 @@ internal sealed partial class ForaySignalModule(
         {
             Kind = ObservationKind.Chain, ChainNumber = number, ChainSecondsLeft = secondsLeft
         };
-        observations.Record(chainRecord);
+        linker.Chain(chainRecord, Emit);
         playerContext.NoteChain(number, chainRecord.ObservedAtMs);
+    }
+
+    /// <summary>A defeat notice (kind 13): the enemy is looked up now and, if not found yet, by <see cref="ResolveTick"/>.</summary>
+    private void RecordDefeat(byte by, uint? enemyNameId)
+    {
+        var defeat = observations.GetContext() with { Kind = ObservationKind.SelfDefeat, DefeatBy = by };
+        linker.Defeat(defeat, enemyNameId, enemies.IdentifyDefeat, Emit);
+    }
+
+    /// <summary>
+    /// A loot notice (kind 9) with its link: the latest defeat (via the linker), the player's chain, the notice row,
+    /// and the FATE id when a FATE reward window is open (then never a kill link).
+    /// </summary>
+    private void RecordLoot(uint itemId, uint? quantity, uint? noticeRow, Vector3 playerPosition)
+    {
+        var context = observations.GetContext();
+        var chain = playerContext.ChainAt(context.ObservedAtMs);
+        fateRewards.Observe(context.VisitId, CurrentFates(context.TerritoryId), context.ObservedAtMs);
+        var fate = fateRewards.Open(context.VisitId, context.ObservedAtMs, playerPosition.X, playerPosition.Z);
+        linker.Loot(context with
+        {
+            Kind = ObservationKind.Loot,
+            GameId = itemId,
+            Quantity = quantity,
+            NoticeRow = noticeRow,
+            ChainNumber = chain.Number,
+            ChainAgeMs = chain.AgeMs
+        }, fate, Emit);
+    }
+
+    private List<FateSnapshot> CurrentFates(uint territory)
+    {
+        var list = new List<FateSnapshot>();
+        foreach (var fate in fateTable)
+            if (fate.TerritoryType.RowId == territory)
+                list.Add(new FateSnapshot(fate.FateId, (byte)fate.State, fate.Progress, fate.StartTimeEpoch,
+                    fate.Position.X, fate.Position.Y, fate.Position.Z, fate.Radius));
+        return list;
+    }
+
+    private bool IsPartyMember(ILogMessageEntity source)
+    {
+        var name = source.Name.ExtractText();
+        foreach (var member in partyList)
+            if (member.World.RowId == source.HomeWorldId && member.Name.TextValue == name)
+                return true;
+        return false;
+    }
+
+    /// <summary>Records only while the record's content (Eureka, Bozja, Occult Crescent) is ticked.</summary>
+    private void Emit(Observation observation)
+    {
+        if (forayService.IsContentEnabled(observation.TerritoryId))
+            observations.Record(observation);
+    }
+
+    private void ResolveTick()
+    {
+        if (!Enabled || linker.PendingCount == 0)
+            return;
+        try
+        {
+            linker.Tick(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), enemies.IdentifyDefeat, Emit);
+        }
+        catch (Exception ex)
+        {
+            log.Warning($"Foray defeat linking failed ({ex.GetType().Name}).");
+        }
     }
 
     /// <summary>
@@ -162,7 +245,7 @@ internal sealed partial class ForaySignalModule(
 
             if (chat.TargetKind is (XivChatRelationKind.EngagedEnemy or XivChatRelationKind.UnengagedEnemy) &&
                 EnglishNotices.IsSelfDefeat(text) && pairing.FallbackRecords((int)ObservationKind.SelfDefeat, now))
-                observations.Record(observations.GetContext() with { Kind = ObservationKind.SelfDefeat });
+                RecordDefeat((byte)ObjectCategory.Self, null);
             return;
         }
 
@@ -173,12 +256,7 @@ internal sealed partial class ForaySignalModule(
         if (items.Length != 1 || items[0].ItemId == 0 || !pairing.FallbackRecords((int)ObservationKind.Loot, now))
             return;
 
-        observations.Record(observations.GetContext() with
-        {
-            Kind = ObservationKind.Loot,
-            GameId = items[0].ItemId,
-            Quantity = EnglishNotices.LootQuantity(text)
-        });
+        RecordLoot(items[0].ItemId, EnglishNotices.LootQuantity(text), null, objects.LocalPlayer!.Position);
     }
 
     private void SignalTick()
@@ -195,6 +273,7 @@ internal sealed partial class ForaySignalModule(
             var context = observations.GetContext();
             if (visitId != context.VisitId)
             {
+                linker.Flush(Emit);
                 visitId = context.VisitId;
                 treasures.Clear();
                 encounters.Clear();
@@ -206,7 +285,7 @@ internal sealed partial class ForaySignalModule(
             if (Heartbeat.IsDue(now, lastHeartbeat))
             {
                 lastHeartbeat = now;
-                observations.Record(Heartbeat.Create(context, player.Position, gameVersion.Value));
+                observations.Record(Heartbeat.Create(context, player.Position, gameVersion.Value, lootListening));
             }
 
             SampleTreasure(context);

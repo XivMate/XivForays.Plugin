@@ -137,6 +137,7 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton(PartyList);
         services.AddSingleton(Log);
         services.AddSingleton(GameGui);
+        services.AddSingleton<Core.FateRewardWindow>();
         services.AddSingleton<FateModule>();
         services.AddSingleton<SchedulerService>();
         services.AddSingleton<TerritoryService>();

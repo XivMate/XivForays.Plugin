@@ -10,7 +10,13 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
   mutation/adaptation, when it appears, dies and respawns, and when it starts fighting.
 - **FATEs, critical engagements, treasure coffers, pots and bunnies:** which one, where, and its progress.
 - **Your own drops, EXP chains and kills:** read from game notices (item id and amount, chain number). Player chat is
-  never read.
+  never read. Each kill notice says which monster was defeated (the same game ids as above), and each drop and chain
+  notice says which kill it came after, your chain at that moment, and whether a FATE had just finished (so FATE
+  rewards are not counted as monster drops).
+- **Your party's kills, as a category only:** when the game tells you a party member defeated a monster, the plugin
+  records "a party member's kill" and which monster it was. It never records which party member.
+- **Whether drop recording is on:** the 30 second position record says whether the plugin is listening for drops, so
+  "nothing dropped" can be told apart from "not recording".
 - **Your own foray state:** your position every 30 seconds, job and level, elemental/knowledge level, the magia board,
   the chain timer, whether you are dead or mounted, and a short list of foray buffs (sprint, sneak, logos/lost/phantom
   actions, food, raise/weakness).

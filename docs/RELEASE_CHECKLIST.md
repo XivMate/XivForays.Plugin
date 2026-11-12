@@ -6,7 +6,7 @@ Plugin: XivMate Foray Data Gathering (`XivForays.Plugin`), Dalamud API 15.
 
 1. Merge the release branch into `master` (it holds pose capture, player context and the release fixes).
 2. `XivForays.Plugin/XivForays.Plugin.csproj` has `<Version>0.0.0.14</Version>`; `Core/ContextRules.cs` has
-   `CaptureRevision = 3`. Bump both whenever capture logic changes.
+   `CaptureRevision = 3` (0.0.0.15: `CaptureRevision = 4`, drop linking). Bump both whenever capture logic changes.
 3. `dotnet test XivForays.Plugin.Tests -c Release -p:Platform=x64` is green.
 4. Build `dotnet build XivForays.Plugin/XivForays.Plugin.csproj -c Release -p:Platform=x64` and check one session in game:
    - the Debug tab shows pose and player-context lines, and dalamud.log has no `[XivForays.Plugin]` warnings;

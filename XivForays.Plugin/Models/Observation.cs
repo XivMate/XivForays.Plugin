@@ -156,4 +156,36 @@ internal sealed record Observation
 
     /// <summary>Kind 14: the game version (ffxivgame.ver digits as one number, e.g. 2025100100000000).</summary>
     public long? GameVersion { get; init; }
+
+    // Drop linking (capture revision 4). Categories and game ids only: never a name or another player's id.
+
+    /// <summary>Kind 13: who made the kill, as a category: 1 = you, 2 = a party member. Kinds 9, 10: of the linked defeat.</summary>
+    public byte? DefeatBy { get; init; }
+
+    /// <summary>Kind 13: the enemy's form bits (1 mutated, 2 adapted; 0 normal), as Core.PoseMath.Form.</summary>
+    public byte? Form { get; init; }
+
+    /// <summary>Kind 13: how the enemy was found (Core.EnemyMatch).</summary>
+    public byte? EnemyMatch { get; init; }
+
+    /// <summary>Kind 13: how many enemies the match chose from.</summary>
+    public byte? EnemyCandidates { get; init; }
+
+    /// <summary>Kind 9: the LogMessage row of the notice (657 / 3538 / 3599); absent on the chat fallback.</summary>
+    public uint? NoticeRow { get; init; }
+
+    /// <summary>Kinds 9, 10: the enemyTrackId of the latest defeat notice (own or party) this record follows.</summary>
+    public Guid? DefeatTrackId { get; init; }
+
+    /// <summary>Kinds 9, 10: ms from that defeat notice to this notice.</summary>
+    public uint? DefeatAgeMs { get; init; }
+
+    /// <summary>Kinds 3, 9: ms since the chain notice whose number is in <see cref="ChainNumber"/>.</summary>
+    public uint? ChainAgeMs { get; init; }
+
+    /// <summary>Kind 9: the FATE whose reward window is open. When set, the record is never linked to a kill.</summary>
+    public uint? FateRewardId { get; init; }
+
+    /// <summary>Kind 14: the loot and defeat notice hook is attached.</summary>
+    public bool? LootListening { get; init; }
 }

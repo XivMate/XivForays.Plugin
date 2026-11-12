@@ -18,7 +18,8 @@ internal sealed class FateModule(
     IPluginLog log,
     ApiService api,
     ForayService forayService,
-    ObservationService observations) : IModule
+    ObservationService observations,
+    FateRewardWindow fateRewards) : IModule
 {
     private readonly FateLifecycle lifecycle = new();
     // Legacy FATE-end route records (name, level) for the FATEs the lifecycle is tracking.
@@ -101,6 +102,7 @@ internal sealed class FateModule(
                 fate.Position.X, fate.Position.Y, fate.Position.Z, fate.Radius));
         }
 
+        fateRewards.Observe(context.VisitId, snapshots, context.ObservedAtMs);
         lifecycle.Sample(context, snapshots, observation =>
         {
             observations.Record(observation);
