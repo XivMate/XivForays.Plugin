@@ -154,6 +154,8 @@ public sealed class EnemyTrackingService(
                 OverlaySafe(() => overlay!.Seen(current.Id, current.Position.MobIngameId, current.LayoutId, current.Home,
                     current.FirstPosition, new Vector3(current.Position.X, current.Position.Y, current.Position.Z),
                     current.Position.IsInCombat, current.FateId));
+            if (Overlay != null)
+                OverlaySafe(() => overlay!.NoteLevel(current.Position.MobIngameId, current.ForayLevel is > 0 ? current.ForayLevel.Value : current.CombatLevel));
             poseCapture.Observe(enemy, current.Id, replacedTrackId, current.Position.IsMutated, current.Position.IsAdapted,
                 current.LayoutId, context, record);
 

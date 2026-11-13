@@ -79,6 +79,8 @@ internal sealed class CollectorSession
     private readonly List<string> confirmedDrop = new();
     // A defeat notice can name a track before the scan saw it at HP 0.
     private readonly Dictionary<Guid, byte> pendingDefeats = new();
+    // Enemy levels seen this session (game data, not visit state): the map tooltip shows them.
+    private readonly Dictionary<uint, byte> levels = new();
     private CoverageSnapshot? snapshot;
     private int snapshotVersion;
     private long scan;
@@ -353,6 +355,17 @@ internal sealed class CollectorSession
     }
 
     public bool IsOccupied(CoveragePoint point) => claimed.Contains(point.Key);
+
+    /// <summary>The level of an enemy as last seen (Eureka: its elemental level), for the map tooltip.</summary>
+    public void NoteLevel(uint bnpcId, byte level)
+    {
+        if (level == 0 || bnpcId == 0 || levels.Count >= 1024 && !levels.ContainsKey(bnpcId))
+            return;
+        levels[bnpcId] = level;
+    }
+
+    /// <summary>0 when the enemy was not seen yet.</summary>
+    public byte LevelOf(uint bnpcId) => levels.TryGetValue(bnpcId, out var level) ? level : (byte)0;
 
     private void Bind(OverlayEnemy enemy)
     {

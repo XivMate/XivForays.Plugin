@@ -9,6 +9,9 @@ using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel.Sheets;
 using XivMate.DataGathering.Forays.Dalamud.Configuration;
 using XivMate.DataGathering.Forays.Dalamud.Core;
@@ -64,6 +67,16 @@ internal sealed class CollectorOverlayService : IDisposable
     private readonly bool[] areaOk = new bool[AreaSegments];
     private readonly Vector3[] packPoints = new Vector3[PackWatch.MaxPoints];
     private readonly SpawnLabels labels = new();
+    private readonly MapPoint[] mapPoints = new MapPoint[MapRates.MaxMaxMarkers];
+    private readonly MapPointByDistance mapOrder = new();
+    private readonly Dictionary<string, string> pendingTimers = new(StringComparer.Ordinal);
+    private int mapPointCount;
+    private int mapPicked = -1;
+    private string mapLine = "";
+    private string mapHoverKey = "";
+    private string mapHoverText = "";
+    private long mapHoverTick;
+    private bool mapWasOpen;
     private int packCount;
     private PackStatus pack;
     private float packY;
@@ -161,9 +174,10 @@ internal sealed class CollectorOverlayService : IDisposable
         session.Clear();
         session.SetSnapshot(null);
         pinnedKey = null;
-        rowCount = emptyCount = deathRowCount = packCount = 0;
+        rowCount = emptyCount = deathRowCount = packCount = mapPointCount = 0;
         pack = default;
         selected = default;
+        pendingTimers.Clear();
     }
 
     // ---- 500 ms tick (framework thread): download state, nearest points, prepared strings ----
@@ -219,13 +233,13 @@ internal sealed class CollectorOverlayService : IDisposable
         feedLine = support != ZoneSupport.Supported ? "" : FeedText(feed, now);
         if (support != ZoneSupport.Supported || !hasPlayer)
         {
-            rowCount = emptyCount = deathRowCount = packCount = 0;
+            rowCount = emptyCount = deathRowCount = packCount = mapPointCount = 0;
             pack = default;
             selected = default;
             return;
         }
 
-        if (features.Conditions)
+        if (features.Conditions || features.Map)
             ReadConditions();
         BuildDeaths(now);
         BuildNearest();
@@ -233,6 +247,7 @@ internal sealed class CollectorOverlayService : IDisposable
         BuildPointerText();
         BuildConfirmations(now);
         BuildPack(now);
+        BuildMap();
     }
 
     private void BuildPointerText()
@@ -346,10 +361,12 @@ internal sealed class CollectorOverlayService : IDisposable
         return name.Length == 0 ? null : name;
     }
 
-    private ConditionState ConditionOf(CoveragePoint point)
+    private ConditionState ConditionOf(CoveragePoint point) =>
+        features.Conditions ? EvaluateCondition(point) : ConditionState.Unknown;
+
+    /// <summary>The condition now (night, weather, FATE), whether or not box 8 is ticked (the map filter uses it).</summary>
+    private ConditionState EvaluateCondition(CoveragePoint point)
     {
-        if (!features.Conditions)
-            return ConditionState.Unknown;
         if (!conditionStates.TryGetValue(point.Condition, out var state))
         {
             state = ConditionCheck.Evaluate(point.Condition, WeatherName(), night, activeFates);
@@ -535,6 +552,53 @@ internal sealed class CollectorOverlayService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Feature 9: the points the map shows, filtered by the status boxes and the two "just spawning" filters, nearest
+    /// to the player first (the per-view cap keeps the nearest). Pending respawn timers come from the same estimates
+    /// as feature 2.
+    /// </summary>
+    private void BuildMap()
+    {
+        mapPointCount = 0;
+        pendingTimers.Clear();
+        if (!features.Map || session.Snapshot is not { } snapshot)
+            return;
+        foreach (var death in session.Deaths)
+        {
+            if (death.PointKey == null || death.FateBound || pendingTimers.Count >= CollectorSession.MaxDeaths)
+                continue;
+            var point = snapshot.ByKey.TryGetValue(death.PointKey, out var p) ? p : null;
+            var condition = point?.Condition ?? "";
+            var estimate = RespawnTable.For(point?.BnpcId ?? death.BnpcId, condition, territory);
+            pendingTimers[death.PointKey] = RespawnTimer.Text(territory, condition, estimate, Unix(death.DiedAtMs), unixNow, out _);
+        }
+
+        var filter = features.MapFilter;
+        foreach (var point in snapshot.Points)
+        {
+            if (mapPointCount >= mapPoints.Length)
+                break;
+            var status = session.StatusOf(point, out _);
+            var pending = pendingTimers.ContainsKey(point.Key);
+            var picked = point.Key == pinnedKey;
+            var condition = EvaluateCondition(point);
+            if (!filter.Shows(status, condition, pending, picked))
+                continue;
+            var dx = point.X - player.X;
+            var dz = point.Z - player.Z;
+            mapPoints[mapPointCount++] = new MapPoint(point, status, condition == ConditionState.Unavailable, pending, picked, dx * dx + dz * dz);
+        }
+
+        Array.Sort(mapPoints, 0, mapPointCount, mapOrder);
+        mapPicked = -1;
+        for (var i = 0; i < mapPointCount && pinnedKey != null; i++)
+            if (mapPoints[i].Picked)
+            {
+                mapPicked = i;
+                break;
+            }
+    }
+
     // ---- Drawing (every frame): no allocation, only the prepared values ----
 
     public void Draw()
@@ -548,6 +612,8 @@ internal sealed class CollectorOverlayService : IDisposable
             DrawWindow();
             if (support == ZoneSupport.Supported && hasPlayer && features.DrawsWorld)
                 DrawWorld(Environment.TickCount64);
+            if (support == ZoneSupport.Supported && hasPlayer && features.Map)
+                DrawMap();
         }
         catch (Exception ex)
         {
@@ -557,7 +623,7 @@ internal sealed class CollectorOverlayService : IDisposable
 
     private void DrawWindow()
     {
-        var listOrRange = features.NearbyList || features.Range || features.Respawn || features.LocalConfirm || features.PackWatch;
+        var listOrRange = features.NearbyList || features.Range || features.Respawn || features.LocalConfirm || features.PackWatch || features.Map;
         if (!listOrRange && statusLine.Length == 0)
             return;
         // A sensible first position and size; afterwards ImGui keeps where the window was put.
@@ -588,6 +654,8 @@ internal sealed class CollectorOverlayService : IDisposable
 
         if (support == ZoneSupport.Supported)
         {
+            if (features.Map)
+                ImGui.TextDisabled(mapLine.Length > 0 ? mapLine : "Map: open the area map to see the spawn points.");
             if (features.PackWatch)
                 DrawPackLines();
             if (features.LocalConfirm)
@@ -969,6 +1037,236 @@ internal sealed class CollectorOverlayService : IDisposable
             list.AddText(new Vector2(viewport.Pos.X + (viewport.Size.X - detailSize.X) / 2, top + lineSize.Y + 2), Colour(0xFF66D1FFu, 1f), pack.Detail);
     }
 
+    /// <summary>
+    /// Feature 9: the spawn points drawn over the game's area map window (ImGui, read-only). The map image node of the
+    /// open map gives where the map texture is on screen (it moves and scales with the game's zoom and pan), and the
+    /// map agent gives the open map's id, size factor and offsets. Drawn only while the map shows the player's own map,
+    /// clipped to the map view, at most the configured number of markers (nearest first). No allocation per frame
+    /// except the tooltip text, rebuilt only when the hovered point or the 500 ms data changes.
+    /// </summary>
+    private unsafe void DrawMap()
+    {
+        var addonPtr = gameGui.GetAddonByName("AreaMap");
+        if (addonPtr.IsNull || !addonPtr.IsVisible)
+        {
+            mapWasOpen = false;
+            SetMapLine(-1, 0, 0);
+            mapHoverKey = "";
+            return;
+        }
+
+        var addon = (AddonAreaMap*)addonPtr.Address;
+        var agent = AgentMap.Instance();
+        var component = addon->ComponentMap;
+        if (agent == null || component == null || component->BaseMapImage == null)
+        {
+            SetMapLine(-2, 0, 0);
+            return;
+        }
+
+        if (agent->SelectedMapId != clientState.MapId || agent->SelectedMapSizeFactor <= 0)
+        {
+            SetMapLine(-3, 0, 0);
+            return;
+        }
+
+        var origin = ImGui.GetMainViewport().Pos;
+        var image = &component->BaseMapImage->AtkResNode;
+        var frame = component->OwnerNode != null ? &component->OwnerNode->AtkResNode : addon->RootNode;
+        if (frame == null)
+            return;
+        var clipMin = origin + new Vector2(frame->ScreenX, frame->ScreenY);
+        var clipMax = clipMin + new Vector2(frame->Width * frame->Transform.M11, frame->Height * frame->Transform.M22);
+        var view = MapView.FromNode(origin.X + image->ScreenX, origin.Y + image->ScreenY, image->Transform.M11, image->Transform.M22,
+            image->Width, image->Height, agent->SelectedOffsetX, agent->SelectedOffsetY, agent->SelectedMapSizeFactor, clipMin, clipMax);
+        if (!view.Valid)
+        {
+            SetMapLine(-2, 0, 0);
+            return;
+        }
+
+        // A check for the test: how far the game's own player arrow is from where this maths puts the player.
+        var gap = -1;
+        var cone = addon->AreaMap.PlayerCone;
+        if (cone != null && cone->AtkResNode.IsVisible())
+        {
+            var node = &cone->AtkResNode;
+            var pivot = origin + new Vector2(node->ScreenX + node->Transform.M11 * node->OriginX + node->Transform.M21 * node->OriginY,
+                node->ScreenY + node->Transform.M12 * node->OriginX + node->Transform.M22 * node->OriginY);
+            var distance = Vector2.Distance(pivot, view.ToScreen(player.X, player.Z));
+            gap = float.IsFinite(distance) ? (int)MathF.Min(distance, 9999f) : -1;
+        }
+
+        if (!mapWasOpen)
+        {
+            mapWasOpen = true;
+            log.Information(string.Create(CultureInfo.InvariantCulture,
+                $"Collector overlay map view: size factor {agent->SelectedMapSizeFactor}, offset {agent->SelectedOffsetX}/{agent->SelectedOffsetY}, image {image->Width}x{image->Height} scale {image->Transform.M11:0.###}/{image->Transform.M22:0.###}, map scale {addon->AreaMap.MapScale:0.###}, frame {frame->Width}x{frame->Height}, arrow gap {gap} px"));
+        }
+
+        var list = ImGui.GetBackgroundDrawList();
+        list.PushClipRect(clipMin, clipMax, false);
+        var alpha = features.Opacity;
+        var size = 4.5f * features.MarkerScale;
+        var mouse = ImGui.GetMousePos();
+        var hoverLimit = MathF.Max(MapRates.HoverPixels, size + 2f);
+        var hovered = -1;
+        var hoveredDistance = hoverLimit * hoverLimit;
+        var budget = features.MapMaxMarkers;
+        var drawn = 0;
+        var pickedAt = -1;
+        for (var i = 0; i < mapPointCount && drawn < budget; i++)
+        {
+            var marker = mapPoints[i];
+            var screen = view.ToScreen(marker.Point.X, marker.Point.Z);
+            if (!view.Visible(screen, size))
+                continue;
+            drawn++;
+            if (marker.Picked)
+                pickedAt = i;
+            var colour = Colour(CoverageStatusMap.Colour(marker.Status), marker.Greyed ? alpha * 0.4f : alpha);
+            MapShape(list, screen, size, colour, ShapeOf(marker.Status), marker.Status == CoverageStatus.WalkPast);
+            if (marker.Pending)
+                list.AddCircle(screen, size + 3f, Colour(0xFFB0D64Du, alpha), 16, 2f);
+            var d2 = Vector2.DistanceSquared(mouse, screen);
+            if (d2 < hoveredDistance)
+            {
+                hoveredDistance = d2;
+                hovered = i;
+            }
+        }
+
+        // The picked point (always, even beyond the marker cap): a large ring and a cross, on top.
+        if (mapPicked >= 0 && mapPicked < mapPointCount &&
+            view.ToScreen(mapPoints[mapPicked].Point.X, mapPoints[mapPicked].Point.Z) is var at && view.Visible(at, size))
+        {
+            var picked = mapPoints[mapPicked];
+            if (pickedAt < 0)
+                MapShape(list, at, size, Colour(CoverageStatusMap.Colour(picked.Status), alpha), ShapeOf(picked.Status),
+                    picked.Status == CoverageStatus.WalkPast);
+            var pointer = Colour(0xFF40E0FFu, 1f);
+            list.AddCircle(at, size + 8f, Colour(0xFF000000u, 0.6f), 24, 4f);
+            list.AddCircle(at, size + 8f, pointer, 24, 2.5f);
+            list.AddLine(at - new Vector2(size + 14f, 0), at - new Vector2(size + 5f, 0), pointer, 2f);
+            list.AddLine(at + new Vector2(size + 5f, 0), at + new Vector2(size + 14f, 0), pointer, 2f);
+        }
+
+        if (features.PackWatch && pack.Line.Length > 0)
+            DrawPackOnMap(list, view, alpha);
+        list.PopClipRect();
+        SetMapLine(drawn, mapPointCount, gap);
+
+        if (hovered >= 0 && !ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow))
+        {
+            var marker = mapPoints[hovered];
+            if (marker.Point.Key != mapHoverKey || mapHoverTick != tickNow)
+            {
+                mapHoverKey = marker.Point.Key;
+                mapHoverTick = tickNow;
+                mapHoverText = MapTooltip(marker);
+            }
+
+            ImGui.BeginTooltip();
+            ImGui.TextUnformatted(mapHoverText);
+            ImGui.EndTooltip();
+        }
+    }
+
+    private int mapLineDrawn = int.MinValue;
+    private int mapLineTotal = int.MinValue;
+    private int mapLineGap = int.MinValue;
+
+    /// <summary>The map line of the window, rebuilt only when a number changes (drawn below 0: a state code).</summary>
+    private void SetMapLine(int drawn, int total, int gap)
+    {
+        if (drawn == mapLineDrawn && total == mapLineTotal && gap == mapLineGap)
+            return;
+        mapLineDrawn = drawn;
+        mapLineTotal = total;
+        mapLineGap = gap;
+        mapLine = drawn switch
+        {
+            -1 => "",
+            -2 => "Map: the map view could not be read.",
+            -3 => "Map: showing another map; spawn points are drawn on your current zone's map only.",
+            _ => "Map: " + drawn.ToString(CultureInfo.InvariantCulture) + " markers in view (" + total.ToString(CultureInfo.InvariantCulture) +
+                 " match the filters)" + (gap >= 0 ? ", arrow check " + gap.ToString(CultureInfo.InvariantCulture) + " px" : "")
+        };
+    }
+
+    private string MapTooltip(MapPoint marker)
+    {
+        var point = marker.Point;
+        var level = session.LevelOf(point.BnpcId);
+        var text = NameOf(point.Name, point.BnpcId) + (level > 0 ? "  Lv " + level.ToString(CultureInfo.InvariantCulture) : "") + "\n" +
+                   (session.Confirmations.ContainsKey(point.Key) && marker.Status == CoverageStatus.Confirmed ? "Confirmed locally" : CoverageStatusMap.Label(marker.Status)) +
+                   (point.Qualifier != CoverageQualifier.None ? " (" + CoverageStatusMap.QualifierText(point.Qualifier) + ")" : "") +
+                   (point.HeightKnown ? "" : ", height uncertain") + "\n" +
+                   "When: " + (point.Condition.Length > 0 ? point.Condition : "unknown") +
+                   (marker.Greyed ? " (" + ConditionCheck.Reason(point.Condition) + ")" : "");
+        if (marker.Pending && pendingTimers.TryGetValue(point.Key, out var timer))
+            text += "\nRespawn " + timer;
+        if (marker.Picked)
+            text += "\nPicked in the list";
+        return text;
+    }
+
+    /// <summary>Pack watch on the map: the waiting points, the safe area outline and the best spot.</summary>
+    private void DrawPackOnMap(ImDrawListPtr list, MapView view, float alpha)
+    {
+        var ringColour = Colour(0xFF66D1FFu, alpha);
+        for (var i = 0; i < packCount; i++)
+            list.AddCircle(view.ToScreen(packPoints[i].X, packPoints[i].Z), 7f, ringColour, 16, 2f);
+        if (!pack.HasSpot)
+            return;
+        var areaColour = Colour(pack.AllInRange ? 0xFF7FE07Fu : 0xFF40C0FFu, alpha);
+        for (var i = 0; i < AreaSegments; i++)
+        {
+            var j = (i + 1) % AreaSegments;
+            list.AddLine(view.ToScreen(area[i].X, area[i].Y), view.ToScreen(area[j].X, area[j].Y), areaColour, 2f);
+        }
+
+        var at = view.ToScreen(pack.Spot.X, pack.Spot.Y);
+        list.AddLine(at - new Vector2(5, 5), at + new Vector2(5, 5), areaColour, 2.5f);
+        list.AddLine(at - new Vector2(5, -5), at + new Vector2(5, -5), areaColour, 2.5f);
+    }
+
+    /// <summary>A small map marker in the in-world shapes: check, diamond, circle (hollow for walk-past), ?, square.</summary>
+    private static void MapShape(ImDrawListPtr list, Vector2 at, float size, uint colour, Shape shape, bool hollow)
+    {
+        var backing = Colour(0xFF000000u, ((colour >> 24) & 0xFF) / 255f * 0.7f);
+        switch (shape)
+        {
+            case Shape.Diamond:
+                list.AddQuadFilled(at with { Y = at.Y - size - 1 }, at with { X = at.X + size + 1 }, at with { Y = at.Y + size + 1 },
+                    at with { X = at.X - size - 1 }, backing);
+                list.AddQuad(at with { Y = at.Y - size }, at with { X = at.X + size }, at with { Y = at.Y + size }, at with { X = at.X - size },
+                    colour, 2f);
+                break;
+            case Shape.Circle:
+                list.AddCircleFilled(at, size + 1, backing);
+                if (!hollow)
+                    list.AddCircleFilled(at, size - 1, colour);
+                list.AddCircle(at, size - 0.5f, colour, 12, 1.8f);
+                break;
+            case Shape.Check:
+                list.AddCircleFilled(at, size + 1, backing);
+                list.AddLine(at + new Vector2(-size * 0.6f, 0), at + new Vector2(-size * 0.15f, size * 0.5f), colour, 2f);
+                list.AddLine(at + new Vector2(-size * 0.15f, size * 0.5f), at + new Vector2(size * 0.7f, -size * 0.6f), colour, 2f);
+                break;
+            case Shape.Question:
+                list.AddCircleFilled(at, size + 1, backing);
+                list.AddCircle(at, size, colour, 12, 1.5f);
+                var fontSize = MathF.Max(8f, size * 2.2f);
+                list.AddText(ImGui.GetFont(), fontSize, at - new Vector2(fontSize * 0.27f, fontSize * 0.5f), colour, "?", 0f);
+                break;
+            default:
+                list.AddRectFilled(at - new Vector2(size, size), at + new Vector2(size, size), backing);
+                list.AddRect(at - new Vector2(size, size), at + new Vector2(size, size), colour, 0f, ImDrawFlags.None, 1.5f);
+                break;
+        }
+    }
+
     /// <summary>A flat circle at the point's own height (16 segments, failed projections skipped).</summary>
     private void DrawWorldCircle(ImDrawListPtr list, Vector3 centre, float radius, uint colour, float thickness)
     {
@@ -1118,6 +1416,19 @@ internal sealed class CollectorOverlayService : IDisposable
         public bool Approximate;
         public bool FateBound;
         public uint DefeatColour => Who == "Your kill" ? 0xFFB0D64Du : 0xFFD0D0D0u;
+    }
+
+    /// <summary>One spawn point the map may draw (feature 9), with what the filters decided at the last tick.</summary>
+    private readonly record struct MapPoint(CoveragePoint Point, CoverageStatus Status, bool Greyed, bool Pending, bool Picked, float Distance2);
+
+    /// <summary>Nearest first; ties by key so the order is stable.</summary>
+    private sealed class MapPointByDistance : IComparer<MapPoint>
+    {
+        public int Compare(MapPoint a, MapPoint b)
+        {
+            var c = a.Distance2.CompareTo(b.Distance2);
+            return c != 0 ? c : string.CompareOrdinal(a.Point.Key, b.Point.Key);
+        }
     }
 
     private readonly record struct EmptyMarker(string Key, Vector3 Position, CoverageStatus Status, bool Hollow, bool Greyed, bool Pinned);

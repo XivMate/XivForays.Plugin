@@ -140,6 +140,37 @@ internal class GeneralTab(
         ImGui.Unindent();
         changed |= Box("8. Spawn conditions##OverlayConditions", configuration.OverlayConditions, v => configuration.OverlayConditions = v,
             "Shows the condition text (weather, night, FATE) and greys a point when the condition is known to be unmet right now.");
+        changed |= Box("9. Show on the in-game map##OverlayMap", configuration.OverlayMap, v => configuration.OverlayMap = v,
+            "Draws the spawn points of your zone over the game's area map window (it follows zoom and pan), in the same colours and shapes as the markers in the world. Hover a point for the enemy, level, status and condition. The picked row and the Pack watch area are shown too. The minimap is not covered yet.");
+        if (configuration.OverlayMap)
+        {
+            ImGui.Indent();
+            changed |= Box("Confirmed##OverlayMapConfirmed", configuration.OverlayMapConfirmed, v => configuration.OverlayMapConfirmed = v,
+                "Points a plugin player already saw spawn (nothing more to do there).");
+            ImGui.SameLine();
+            changed |= Box("To confirm##OverlayMapToConfirm", configuration.OverlayMapToConfirm, v => configuration.OverlayMapToConfirm = v,
+                "Exact points only seen nearby: watch one respawn to confirm.");
+            ImGui.SameLine();
+            changed |= Box("Walk-past only##OverlayMapWalkPast", configuration.OverlayMapWalkPast, v => configuration.OverlayMapWalkPast = v,
+                "Approximate points only seen walking past (hollow circles).");
+            ImGui.SameLine();
+            changed |= Box("Never seen##OverlayMapNeverSeen", configuration.OverlayMapNeverSeen, v => configuration.OverlayMapNeverSeen = v,
+                "Exact points the plugin never saw.");
+            changed |= Box("Spawns now only##OverlayMapSpawnsNow", configuration.OverlayMapSpawnsNow, v => configuration.OverlayMapSpawnsNow = v,
+                "Hides points whose condition is known to be unmet right now (night, weather or FATE, as in box 8). Unknown conditions stay shown.");
+            ImGui.SameLine();
+            changed |= Box("Pending respawn only##OverlayMapPendingOnly", configuration.OverlayMapPendingOnly, v => configuration.OverlayMapPendingOnly = v,
+                "Only the points of enemies killed recently that are waiting to respawn (green ring; hover for the ~timer). The status boxes above still apply.");
+            ImGui.SetNextItemWidth(200);
+            var mapMax = configuration.OverlayMapMaxMarkers;
+            if (ImGui.SliderInt("Max map markers##OverlayMapMax", ref mapMax, MapRates.MinMaxMarkers, MapRates.MaxMaxMarkers))
+            {
+                configuration.OverlayMapMaxMarkers = mapMax;
+                changed = true;
+            }
+
+            ImGui.Unindent();
+        }
 
         ImGui.Spacing();
         ImGui.TextUnformatted("Options");

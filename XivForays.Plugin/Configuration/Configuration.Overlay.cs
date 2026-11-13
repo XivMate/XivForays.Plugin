@@ -48,6 +48,23 @@ public partial class Configuration
     /// <summary>8. Spawn condition text, greyed when known unavailable.</summary>
     public bool OverlayConditions { get; set; } = false;
 
+    /// <summary>9. Spawn points on the in-game area map.</summary>
+    public bool OverlayMap { get; set; } = false;
+
+    public bool OverlayMapConfirmed { get; set; } = false;
+    public bool OverlayMapToConfirm { get; set; } = true;
+    public bool OverlayMapWalkPast { get; set; } = true;
+    public bool OverlayMapNeverSeen { get; set; } = true;
+
+    /// <summary>9. Hide points whose condition (night, weather, FATE) is known to be unmet now.</summary>
+    public bool OverlayMapSpawnsNow { get; set; } = false;
+
+    /// <summary>9. Only points of recently killed enemies that wait for their respawn.</summary>
+    public bool OverlayMapPendingOnly { get; set; } = false;
+
+    /// <summary>9. Markers drawn per map view at most (the nearest to the player first).</summary>
+    public int OverlayMapMaxMarkers { get; set; } = MapRates.DefaultMaxMarkers;
+
     /// <summary>World markers are drawn within this distance of the player (yalms, 20 to 150).</summary>
     public float OverlayDisplayYalms { get; set; } = OverlayRates.DefaultDisplayYalms;
 
@@ -81,7 +98,11 @@ public partial class Configuration
         Math.Clamp(OverlayMaxMarkers, 8, OverlayRates.DefaultMaxMarkers),
         Math.Clamp(OverlayListRows, OverlayRates.MinListRows, OverlayRates.MaxListRows),
         OverlayHideInCombat,
-        OverlayHidden);
+        OverlayHidden,
+        OverlayEnabled && OverlayMap,
+        new MapFilter(OverlayMapConfirmed, OverlayMapToConfirm, OverlayMapWalkPast, OverlayMapNeverSeen, OverlayMapSpawnsNow,
+            OverlayMapPendingOnly),
+        Math.Clamp(OverlayMapMaxMarkers, MapRates.MinMaxMarkers, MapRates.MaxMaxMarkers));
 }
 
 /// <summary>The overlay settings as one value (master switch already applied to each feature).</summary>
@@ -105,13 +126,16 @@ internal readonly record struct OverlayFeatures(
     int MaxMarkers,
     int ListRows,
     bool HideInCombat,
-    bool Hidden)
+    bool Hidden,
+    bool Map,
+    MapFilter MapFilter,
+    int MapMaxMarkers)
 {
     /// <summary>The coverage file is downloaded only when the master switch is on.</summary>
     public bool NeedsDownload => Enabled;
 
     /// <summary>The enemy scan feeds the overlay only when a feature uses live enemies.</summary>
-    public bool NeedsScan => Enabled && (NearbyList || Respawn || Range || LocalConfirm || EnemyMarkers || EmptyPoints || PackWatch || Rings);
+    public bool NeedsScan => Enabled && (NearbyList || Respawn || Range || LocalConfirm || EnemyMarkers || EmptyPoints || PackWatch || Rings || Map);
 
     /// <summary>Something is drawn into the game view.</summary>
     public bool DrawsWorld => Enabled && (Pointer || Respawn || LocalConfirm || EnemyMarkers || EmptyPoints || PackWatch || Rings);
