@@ -1,10 +1,11 @@
-# Collector overlay: in-game test checklist (0.0.0.16)
+# Collector overlay: in-game test checklist (0.0.0.16, round 1 fixes)
 
 Work through the sections in order. Each one turns on one more checkbox, so a problem points at one feature. Tick the
 boxes in `/xivforays config`, **General**, section **Collector overlay**. Every checkbox starts off.
 
 Good test spots: an ordinary Anemos or Pagos camp with a few needed points (Walk-past, To confirm or Never seen) and a
-normal ~50 s respawn. Avoid FATEs for sections 2 to 4 until the end.
+normal ~50 s respawn. Avoid FATEs for sections 2 to 4 until the end. For sections 2 and 7, a Pagos or Pyros
+night camp or a sprite spot in its weather.
 
 ## 0. Setup and master switch
 
@@ -33,47 +34,72 @@ Fail if:
 - The plugin logs errors starting with "Collector overlay" in `dalamud.log`.
 - Unticking the master switch does not remove the window at once.
 
-## 1. Nearby needed list
+## 1. Nearby needed list and the pointer
 
-What to do: tick **1. Nearby needed list**. Stand in a camp, then walk 100 y or so in one direction.
+What to do: tick **1. Nearby needed list** (its sub-option **Point to the picked row** is on by default). Stand in a
+camp, then walk 100 y or so in one direction. Click a row, turn the camera away from that point, then walk to it.
 
 What you should see:
 
-- A "Collector overlay" window with a line such as "Coverage checked just now, data through 2026-11-13T15:00:00Z"
-  (first time: "Coverage: downloading..." for a moment).
-- Up to 10 rows (List rows option, 5 to 10): enemy name, status word in its colour (To confirm amber, Walk-past sky
-  blue, Never seen lavender), a qualifier such as (FATE) when the row has one, ", height uncertain" on points whose
-  height is not trusted, and the distance with a world compass direction ("42 y NE", north is up on the map).
-- Confirmed points are not in the list.
-- Rows reorder as you walk, nearest first, without jumping around when two are equally far.
-- Clicking a row pins it (highlighted, "(pinned)" in section 3). Clicking it again unpins it.
+- A "Collector overlay" window, first time at the left of the screen about 480 x 340. Move and resize it: after a
+  plugin reload or a game restart it opens where you left it.
+- A top line with **Hide overlay** and "Coverage checked just now, data through 2026-11-13T15:00:00Z" (first time:
+  "Coverage: downloading..." for a moment).
+- The list has fixed columns (name, status, distance, condition) and always the same number of rows (List rows
+  option, 5 to 10; blank rows when fewer points are needed). Nothing in the window jumps or changes width as rows
+  update or a timer comes and goes.
+- Each row: enemy name, status word in its colour (To confirm amber, Walk-past sky blue, Never seen lavender), a
+  qualifier such as (FATE), ", height uncertain" on points whose height is not trusted, and the distance with a world
+  compass direction ("42 y NE", north is up on the map). Confirmed points are not in the list.
+- Clicking a row picks it: the row is highlighted and starts with ">", and the line under the list says "Picked: the
+  game points to it". Clicking it again lets go (Unpin in section 3 does the same).
+- For the picked point, in the game view: a cyan beacon (vertical line) over the spot with a small ring at its foot
+  and "<name>  42 y" above it, and a dashed cyan guide on the ground from your feet to the spot.
+- When the spot is off screen (behind you or beyond the screen edge): a cyan arrow at the screen edge pointing the way
+  to turn, with "<name>  142 y NE". It moves round the edge as you turn the camera and disappears when the spot is on
+  screen again.
 - Unplug the network (or block the site) and wait 3 minutes: the line changes to "Coverage: offline / cached" and the
   list stays. Reload the plugin while offline: the list comes back from the cache.
 
 Fail if:
 
 - The list shows Confirmed points, or points from another zone.
-- Directions are mirrored (a point to the north of you on the map shows S).
-- The list is empty while the site shows needed points in this zone near you.
+- Directions are mirrored (a point to the north of you on the map shows S), or the edge arrow points away from the
+  spot.
+- The guide or beacon is drawn while no row is picked, or for a row other than the picked one.
+- Lines are drawn across the whole screen when the spot is behind the camera.
 - Without any coverage (first run, offline) enemies are called "Never seen". It must say "Global coverage
   unavailable".
 
 ## 2. Respawn countdown
 
 What to do: tick **2. Respawn countdown**. Kill one ordinary enemy at a needed point and stay near it. Then kill a
-second one and let a party member (if you have one) kill a third.
+night-only enemy (an Ashkin or another night enemy) at night, and a sprite in its weather. If you can, be there when
+the night or the weather ends.
 
 What you should see:
 
-- In the window: "Your kill  <name>  ~50 s  12 y N" counting down in whole seconds ("~49 s", "~48 s" ...). Party kills
-  say "Party kill", deaths you only saw say "Observed death". Your kills are listed first.
-- A clock marker with the same "~N s" text at the spawn point (not where the corpse fell if you pulled it).
-- At zero the text reads **Awaiting spawn**. It never says Confirmed.
-- When the enemy respawns, its row disappears.
+- In the window, at the bottom: "Your kill  <name>  ~50 s (default)  12 y N", counting down in whole seconds. Party
+  kills say "Party kill", deaths you only saw say "Observed death". Your kills are listed first.
+- The number in brackets is the basis of the estimate: "(n 37)" is the measured median of that enemy and its sample
+  count, "(class, n 248)" the value of all night-only (or weather-only) enemies, "(default)" the ordinary estimate.
+- Measured medians: ordinary enemies about 50 s (51 s measured), night-only enemies 146 s, weather-only enemies
+  (sprites) 191 s. So an Ashkin starts at "~146 s" and a sprite at "~191 s", not "~50 s".
+- A clock marker with the same text at the spawn point (not where the corpse fell if you pulled it).
+- When the enemy's condition is not met now, no countdown: "Back at night (ET 18:00, in ~12 min)" for a night enemy by
+  day, "Needs Blizzard/Snow (next in ~40 min)" for a sprite out of its weather (the same forecast as the site).
+- Night and weather enemies despawn within about 2 s of the change (ET 06:00, or the 8 ET hour weather change), and
+  the respawn waits for the condition. When the condition comes back, the countdown starts again from that moment.
+- In Hydatos (no measured kills yet) a night or weather enemy says "timer unknown (night only)" or "timer unknown
+  (weather only)".
+- At zero the text reads **Awaiting spawn**. It never says Confirmed. When the enemy respawns, its row disappears.
 - A FATE enemy shows "FATE enemy: no timer" instead of a countdown.
 
 Fail if:
 
+- An Ashkin or a sprite shows "~50 s".
+- A night enemy by day, or a sprite out of its weather, shows a countdown.
+- The "in ~N min" is clearly off from the site's weather page for the same zone.
 - The timer anchors on the corpse after a pull, or shows exact seconds without the "~".
 - A timer turns into "Confirmed" or keeps counting after the enemy is back.
 - An enemy that only walked out of view (did not die) gets a timer.
@@ -103,21 +129,26 @@ Fail if:
 
 ## 4. Confirmed locally
 
-What to do: tick **4. Confirmed locally feedback**. Stay within 80 y of a needed point (To confirm, Walk-past or Never
-seen) for at least 5 s, kill its enemy, and stay within 100 y until it respawns. Then do the same at another point
-but go beyond 100 y while waiting and come back before it respawns, watching it appear from more than 80 y away.
+What to do: tick **4. Confirmed locally feedback** (and **5. Status markers** with and without **Show confirmed**).
+Stay within 80 y of a needed point (To confirm, Walk-past or Never seen) for at least 5 s, kill its enemy, and stay
+within 100 y until it respawns. Then do the same at another point but go beyond 100 y while waiting and come back
+before it respawns, watching it appear from more than 80 y away.
 
 What you should see:
 
-- First point: within half a second of the respawn appearing, a teal **Confirmed locally** label over the spawn point
-  for about 3 seconds, and the window line "1 confirmed locally, upload pending". The point leaves the needed list.
-  When the server catches up (a few minutes, after its next refresh), the pending count drops by one.
+- First point: within half a second of the respawn appearing, **one** teal **Confirmed locally** label over the
+  spawn for about 3 seconds. With box 5 on it is the enemy's own marker; with box 5 off it is the flash label. Never
+  two labels over the same spawn.
+- The window line "1 confirmed locally, upload pending" (the two confirmation lines are always there, so nothing
+  moves). The point leaves the needed list. When the server catches up (a few minutes, after its next refresh), the
+  pending count drops by one.
 - Without a layout id the label reads "Spawn watched locally; server match uncertain"; far from any known row it reads
   "Confirmed locally (new point)".
 - Second point (you left 100 y and it appeared far away): **no** confirmation.
 
 Fail if:
 
+- "Confirmed" or "Confirmed locally" appears twice over one enemy, even for a moment right after it respawns.
 - A respawn watched from beyond 100 y, or an enemy that was already there when you zoned in, shows Confirmed locally.
 - The confirmation waits for the 3 minute refresh or for a photo.
 - With this box unticked, points still turn Confirmed locally.
@@ -159,21 +190,42 @@ Fail if:
 - A marker sits deep underground or high in the air.
 - An occupied point also shows an empty marker at the same time.
 
-## 7. Ground circles
+## 7. Pack watch
 
-What to do: tick **7. Ground circles**. Select a point (your latest kill or a pinned row) and walk around it.
+What to do: tick **7. Pack watch** (Keep within: 60 y by default, 50 to 80 y; a margin under the 80 y rule). Kill a
+pack of 4 or 5 enemies at needed points (party kills count too). Walk away from all of them, then follow the advice
+until all have respawned. Then try a pack whose points are more than 2 x 60 y apart.
 
 What you should see:
 
-- Two rings around the selected point only: sky blue "80 y watch" and amber "70 y photo", drawn at your own height.
-- Rings shrink a little when you are far above or below the point (they are the cross-section of the 3D range).
-  Segments behind the camera are skipped, not joined across the screen.
-- No rings on points with an uncertain height.
+- A small sky blue ring at each spawn point still waiting for its respawn (own and party kills only; deaths you only
+  saw are not part of the pack).
+- A "Best spot" cross (the centre of the smallest circle round the waiting points) and an outline of the safe area:
+  where you are within the radius of all of them. Amber while you are outside, green inside. The area shrinks as
+  points respawn.
+- One status line, in the window and at the top of the screen:
+  - "Pack watch: in range of 4/5, move 12 y NE" while you are outside the safe area (walk that far towards the best
+    spot);
+  - "In range of all 5, waiting: next ~20 s" inside it (the soonest estimated respawn of the waiting points, from the
+    same estimates as section 2);
+  - "All good: 5 of 5 respawned, 4 confirmed, 1 already done. Move on." when all are back. Points that were already
+    Confirmed when killed count as "already done" and are not waited for.
+- A second line "1 missed: <name>" when a point respawned without a confirmation (usually because you were out of
+  range). Then the "Move on." is left out.
+- A point leaves the waiting set when it respawns, when its condition ends (night or weather), or after 5 minutes
+  ("2 dropped (condition ended or 5 min)").
+- Too far apart: "Pack watch: no spot covers all 3: <A> and <B> are 140 y apart. Split: <A>, <C> | <B>" and no safe
+  area. Watch one group, then the other.
+- The next kill after "All good" starts a new pack.
+- **Single-point 80 y / 70 y rings** (off by default, under Pack watch): the old sky blue "80 y watch" and amber
+  "70 y photo" rings round the selected point only, at your own height.
 
 Fail if:
 
-- Rings appear on more than one point, use red, or draw lines across the whole screen.
-- The ring and the "62 / 80 y" number clearly disagree when you stand on the ring on flat ground.
+- You stand inside the drawn safe area and the line does not say "In range of all".
+- A respawn you watched from inside the area counts as missed.
+- The line says "All good" while a ring is still drawn.
+- Rings or outline segments are drawn across the whole screen.
 
 ## 8. Spawn conditions
 

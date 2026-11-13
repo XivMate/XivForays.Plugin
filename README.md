@@ -49,10 +49,11 @@ default**, and each part has its own checkbox so it can be turned on one at a ti
 
 - **Enable collector overlay** is the master switch. Off means no downloads, no window, no drawing and no extra work
   in the enemy scan.
-- 1 nearby needed list, 2 respawn countdown, 3 range and readiness, 4 "Confirmed locally" feedback, 5 status markers
-  over visible enemies (with **Show confirmed**), 6 markers on empty needed points, 7 ground circles, 8 spawn
-  conditions. Options: display distance (default 100 y, up to 150 y), marker scale and opacity, max markers (64), list
-  rows, hide while in combat, and a quick **Hide overlay**.
+- 1 nearby needed list (pick a row and the game points to it), 2 respawn countdown, 3 range and readiness,
+  4 "Confirmed locally" feedback, 5 status markers over visible enemies (with **Show confirmed**), 6 markers on empty
+  needed points, 7 pack watch (with optional single-point 80 y / 70 y rings), 8 spawn conditions. Options: display
+  distance (default 100 y, up to 150 y), marker scale and opacity, max markers (64), list rows, hide while in combat,
+  and a quick **Hide overlay**.
 
 What it does and does not do:
 
@@ -66,7 +67,9 @@ What it does and does not do:
   **Crowdsource data** and **Record in Eureka**. The overlay never changes what is recorded (capture revision
   unchanged).
 - "Confirmed locally" uses the same rule as the server: an enemy seen spawning with a valid home, or a respawn watched
-  from within 100 y. A respawn timer is an estimate ("~50 s") and never confirms anything.
+  from within 100 y. A respawn timer is an estimate (about 50 s for ordinary enemies, 146 s for night-only and
+  191 s for weather-only enemies, measured from collected data) and never confirms anything. Night and weather enemies
+  say when they can be back ("Back at night (ET 18:00, in ~12 min)") while their condition is not met.
 - Bozja, Zadnor, the Occult Crescent and the Baldesion Arsenal show "Coverage not available".
 
 The in-game test checklist is [docs/COLLECTOR_OVERLAY_TEST.md](docs/COLLECTOR_OVERLAY_TEST.md).
