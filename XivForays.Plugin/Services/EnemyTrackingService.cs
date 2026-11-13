@@ -131,7 +131,7 @@ public sealed class EnemyTrackingService(
                 {
                     if (Overlay != null)
                         OverlaySafe(() => overlay!.Died(current.Id, current.Position.MobIngameId, current.LayoutId, current.Home,
-                            current.FirstPosition, current.FateId));
+                            new Vector3(current.Position.X, current.Position.Y, current.Position.Z), current.FateId));
                     var chain = playerContext.ChainAt(context.ObservedAtMs);
                     var (claim, claimType, lastTarget) = poseCapture.Died(enemy, current.Id, current.LayoutId,
                         current.Home ?? current.FirstPosition, PoseMath.Form(current.Position.IsMutated, current.Position.IsAdapted));

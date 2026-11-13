@@ -195,17 +195,19 @@ public class CollectorOverlayTests
         session.EndScan();
         Assert.Equal("spot", session.Live[track].Match.Point?.Key);
         Assert.True(session.IsOccupied(session.Snapshot!.ByKey["spot"]));
-        // Its death timer anchors at the spawn point, not at the corpse.
+        // Its death timer anchors at the matched row's spawn point, not at the corpse.
         session.BeginScan(1000, Vector3.Zero);
-        session.Died(track, 8000, 0, home, home, 0);
+        session.Died(track, 8000, 0, home, new Vector3(140f, 12f, 200f), 0);
         var death = Assert.Single(session.Deaths);
-        Assert.Equal(home, death.Anchor);
+        Assert.Equal(new Vector3(100, 10, 200), death.Anchor);
+        Assert.Equal(AnchorSource.Row, death.AnchorSource);
+        Assert.False(death.AnchorApproximate);
         Assert.Equal("spot", death.PointKey);
         Assert.False(session.IsOccupied(session.Snapshot!.ByKey["spot"]));
     }
 
     [Fact]
-    public void AnEnemyWithoutHomeAnchorsWhereItWasFirstSeen()
+    public void AMatchedEnemyWithoutHomeAnchorsAtItsRow()
     {
         var session = new CollectorSession();
         session.SetSnapshot(Snapshot(Point("spot", 8000, 0, 0, 0)));
@@ -214,10 +216,66 @@ public class CollectorOverlayTests
         session.Seen(track, 8000, 0, null, new Vector3(0.5f, 0, 0), new Vector3(0.5f, 0, 0), false, 0);
         session.BeginScan(500, Vector3.Zero);
         session.Seen(track, 8000, 0, null, new Vector3(0.5f, 0, 0), new Vector3(30f, 0, 0), true, 0);
-        session.Died(track, 8000, 0, null, new Vector3(0.5f, 0, 0), 0);
+        session.Died(track, 8000, 0, null, new Vector3(30f, 0, 0), 0);
         var death = Assert.Single(session.Deaths);
+        Assert.False(death.AnchorApproximate);
+        Assert.Equal(new Vector3(0, 10, 0), death.Anchor);
+    }
+
+    [Fact]
+    public void AnUnmatchedEnemyAnchorsAtItsHomeNotTheCorpse()
+    {
+        var session = new CollectorSession();
+        session.SetSnapshot(Snapshot());
+        var track = Guid.NewGuid();
+        var home = new Vector3(50, 5, 60);
+        session.BeginScan(0, Vector3.Zero);
+        session.Seen(track, 8000, 0, home, home, home, false, 0);
+        // The home read later (a different DefaultPosition) does not replace the first one.
+        session.BeginScan(500, Vector3.Zero);
+        session.Seen(track, 8000, 0, new Vector3(90, 5, 60), home, new Vector3(90, 5, 60), true, 0);
+        session.Died(track, 8000, 0, new Vector3(90, 5, 60), new Vector3(90, 5, 60), 0);
+        var death = Assert.Single(session.Deaths);
+        Assert.Equal(home, death.Anchor);
+        Assert.Equal(AnchorSource.Home, death.AnchorSource);
+        Assert.False(death.AnchorApproximate);
+    }
+
+    [Fact]
+    public void WithNoRowAndNoHomeTheTimerSitsAtTheDeathSpotFlaggedApproximate()
+    {
+        var session = new CollectorSession();
+        session.SetSnapshot(Snapshot());
+        var track = Guid.NewGuid();
+        session.BeginScan(0, Vector3.Zero);
+        session.Seen(track, 8000, 0, null, new Vector3(0.5f, 0, 0), new Vector3(0.5f, 0, 0), false, 0);
+        session.Died(track, 8000, 0, null, new Vector3(30f, 2f, 0), 0);
+        var death = Assert.Single(session.Deaths);
+        Assert.Equal(AnchorSource.DeathSpot, death.AnchorSource);
         Assert.True(death.AnchorApproximate);
-        Assert.Equal(new Vector3(0.5f, 0, 0), death.Anchor);
+        Assert.Equal(new Vector3(30f, 2f, 0), death.Anchor);
+        Assert.Equal("approximate (death spot)", SpawnAnchor.Note(death.AnchorSource));
+    }
+
+    [Fact]
+    public void SpawnAnchorPrefersTheRowThenTheHomeThenTheDeathSpot()
+    {
+        var home = new Vector3(10, 3, 10);
+        var corpse = new Vector3(50, 4, 10);
+        var exact = Point("a", 1, 0, 1, 2, y: 7);
+        var walkPast = Point("b", 1, 0, 5, 6, status: CoverageStatus.WalkPast);
+        var noHeight = Point("c", 1, 0, 8, 9, y: 99, heightKnown: false);
+
+        Assert.Equal(new ResolvedAnchor(new Vector3(1, 7, 2), true, AnchorSource.Row), SpawnAnchor.Resolve(exact, home, corpse));
+        var approx = SpawnAnchor.Resolve(walkPast, home, corpse);
+        Assert.Equal(new Vector3(5, 10, 6), approx.Position);
+        Assert.True(approx.Approximate);
+        Assert.Equal("approximate (walk-past spot)", approx.Note);
+        // A row without a trusted height keeps its x/z, the height comes from the home.
+        Assert.Equal(new ResolvedAnchor(new Vector3(8, 3, 9), false, AnchorSource.Row), SpawnAnchor.Resolve(noHeight, home, corpse));
+        Assert.Equal(new ResolvedAnchor(home, true, AnchorSource.Home), SpawnAnchor.Resolve(null, home, corpse));
+        Assert.Equal(new ResolvedAnchor(corpse, true, AnchorSource.DeathSpot), SpawnAnchor.Resolve(null, null, corpse));
+        Assert.Equal(AnchorSource.DeathSpot, SpawnAnchor.Resolve(null, Vector3.Zero, corpse).Source);
     }
 
     // ---- local confirmation ----

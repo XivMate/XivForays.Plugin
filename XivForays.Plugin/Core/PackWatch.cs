@@ -161,8 +161,15 @@ internal sealed class PackPoint
     public required string Key { get; init; }
     public string Name { get; init; } = "";
     public uint BnpcId { get; init; }
+    /// <summary>Where it respawns: the matched row, else the enemy's home, else the death spot (<see cref="SpawnAnchor"/>).</summary>
     public Vector3 Anchor { get; init; }
+
     public bool HeightKnown { get; init; } = true;
+    public AnchorSource Source { get; init; }
+
+    /// <summary>A walk-past row or the death spot: drawn as a hollow ring.</summary>
+    public bool Approximate => Source is AnchorSource.RowApproximate or AnchorSource.DeathSpot;
+
     public string Condition { get; init; } = "";
 
     /// <summary>The point was already Confirmed when it was killed: its respawn adds nothing.</summary>
@@ -223,7 +230,7 @@ internal sealed class PackWatch
         }
     }
 
-    /// <summary>An own or party kill of a matched spawn point.</summary>
+    /// <summary>An own or party kill (a matched spawn point, or an unmatched kill keyed by its track).</summary>
     public void Killed(PackPoint point)
     {
         if (PendingCount == 0 && points.Exists(p => p.Outcome is PackOutcome.Respawned or PackOutcome.ConditionEnded or PackOutcome.TimedOut))
@@ -318,6 +325,19 @@ internal sealed class PackWatch
 
         var missedText = missedCount == 0 ? "" : missedCount.ToString(CultureInfo.InvariantCulture) + " missed: " + missed;
         var pending = scratch.Count;
+        var approximate = 0;
+        var deathSpots = 0;
+        foreach (var p in scratchPoints)
+        {
+            if (p.Approximate)
+                approximate++;
+            if (p.Source == AnchorSource.DeathSpot)
+                deathSpots++;
+        }
+
+        if (approximate > 0)
+            missedText += (missedText.Length > 0 ? " | " : "") + approximate.ToString(CultureInfo.InvariantCulture) +
+                          (deathSpots == approximate ? " approximate (death spot)" : " approximate") + ": hollow ring";
         var total = points.Count - alreadyDone;
         if (pending == 0)
         {

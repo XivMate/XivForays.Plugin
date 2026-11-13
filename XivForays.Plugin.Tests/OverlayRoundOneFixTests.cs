@@ -416,6 +416,80 @@ public class OverlayRoundOneFixTests
     }
 
     [Fact]
+    public void APulledEnemyKilledFortyYalmsFromItsHomeGetsItsRingAtTheSpawnNotTheCorpse()
+    {
+        var session = new CollectorSession { PackEnabled = true, PackRadius = 60 };
+        session.SetSnapshot(new CoverageSnapshot(Pagos, "x", [Row("layout:7", 9000, 7, 100, 200)]));
+        var matched = Guid.NewGuid();
+        var unmatched = Guid.NewGuid();
+        var home = new Vector3(100, 10, 200);
+        var otherHome = new Vector3(300, 12, 200);
+        session.BeginScan(1000, new Vector3(110, 10, 200));
+        session.Seen(matched, 9000, 7, home, home, home, false, 0);
+        session.Seen(unmatched, 9100, 0, otherHome, otherHome, otherHome, false, 0);
+        session.EndScan();
+        // Both pulled 40 y and killed there.
+        session.BeginScan(1500, new Vector3(140, 10, 200));
+        session.Seen(matched, 9000, 7, home, home, new Vector3(140, 10, 200), true, 0);
+        session.Seen(unmatched, 9100, 0, otherHome, otherHome, new Vector3(340, 12, 200), true, 0);
+        session.BeginScan(2000, new Vector3(140, 10, 200));
+        session.Died(matched, 9000, 7, home, new Vector3(140, 10, 200), 0);
+        session.Died(unmatched, 9100, 0, otherHome, new Vector3(340, 12, 200), 0);
+        session.DefeatLinked(matched, 1);
+        session.DefeatLinked(unmatched, 1);
+
+        Assert.Equal(2, session.Pack.Points.Count);
+        var row = session.Pack.Points[0];
+        Assert.Equal("layout:7", row.Key);
+        Assert.Equal(new Vector3(100, 10, 200), row.Anchor);
+        Assert.Equal(AnchorSource.Row, row.Source);
+        Assert.False(row.Approximate);
+        var byHome = session.Pack.Points[1];
+        Assert.Equal(otherHome, byHome.Anchor);
+        Assert.Equal(AnchorSource.Home, byHome.Source);
+        Assert.False(byHome.Approximate);
+        // The countdown (box 2) uses the same anchors.
+        Assert.Contains(session.Deaths, d => d.TrackId == matched && d.Anchor == row.Anchor);
+        Assert.Contains(session.Deaths, d => d.TrackId == unmatched && d.Anchor == otherHome);
+
+        // The best spot and the safe area come from the spawn spots: the midpoint of the two, 100 y from each.
+        var status = session.Pack.Status(new Vector3(200, 10, 200), 120, 2500, _ => false, -1);
+        Assert.True(status.HasSpot);
+        Assert.Equal(200f, status.Spot.X, 2);
+        Assert.Equal(200f, status.Spot.Y, 2);
+        Assert.Equal("", status.Detail);
+    }
+
+    [Fact]
+    public void WithNoRowAndNoHomeThePackPointIsTheDeathSpotFlaggedApproximate()
+    {
+        var session = new CollectorSession { PackEnabled = true, PackRadius = 60 };
+        session.SetSnapshot(new CoverageSnapshot(Pagos, "x", []));
+        var track = Guid.NewGuid();
+        session.BeginScan(1000, new Vector3(110, 10, 200));
+        session.Seen(track, 9100, 0, null, new Vector3(100, 10, 200), new Vector3(100, 10, 200), false, 0);
+        session.BeginScan(1500, new Vector3(110, 10, 200));
+        session.Died(track, 9100, 0, null, new Vector3(130, 10, 200), 0);
+        session.DefeatLinked(track, 2); // a party kill
+
+        var point = Assert.Single(session.Pack.Points);
+        Assert.Equal(new Vector3(130, 10, 200), point.Anchor);
+        Assert.Equal(AnchorSource.DeathSpot, point.Source);
+        Assert.True(point.Approximate);
+        var status = session.Pack.Status(new Vector3(110, 10, 200), 60, 2000, _ => false, -1);
+        Assert.Equal("1 approximate (death spot): hollow ring", status.Detail);
+
+        // Its respawn (linked to the dead track) still clears it.
+        session.BeginScan(60_000, new Vector3(110, 10, 200));
+        session.Evidence(new Observation
+        {
+            Kind = ObservationKind.EnemyAppeared, EnemyTrackId = Guid.NewGuid(), GameId = 9100,
+            Respawn = new EnemyRespawn { PreviousTrackId = track, MaxPlayerDistance = 20f }
+        });
+        Assert.Equal(PackOutcome.Respawned, session.Pack.Points[0].Outcome);
+    }
+
+    [Fact]
     public void ThePackIsOffWhenPackWatchIsOff()
     {
         var session = new CollectorSession();

@@ -17,6 +17,10 @@ internal sealed class OverlayEnemy
     public Vector3 Anchor { get; set; }
 
     public bool AnchorIsHome { get; set; }
+
+    /// <summary>The home (DefaultPosition) as read when this instance first had one; never replaced later.</summary>
+    public Vector3? Home { get; set; }
+
     public Vector3 Position { get; set; }
     public bool InCombat { get; set; }
     public PointMatch Match { get; set; }
@@ -30,10 +34,16 @@ internal sealed class OverlayDeath
     public Guid TrackId { get; init; }
     public uint BnpcId { get; init; }
     public uint LayoutId { get; init; }
+    /// <summary>Where it respawns (<see cref="SpawnAnchor"/>): the matched row, else its home, else the death spot.</summary>
     public Vector3 Anchor { get; init; }
 
-    /// <summary>The anchor came from the live position only (no home): the timer location is approximate.</summary>
-    public bool AnchorApproximate { get; init; }
+    public AnchorSource AnchorSource { get; init; }
+
+    /// <summary>False when the anchor height is unreliable (a row with a home height): distances are horizontal.</summary>
+    public bool HeightKnown { get; init; } = true;
+
+    /// <summary>A walk-past row or the death spot: the timer location is approximate.</summary>
+    public bool AnchorApproximate => AnchorSource is AnchorSource.RowApproximate or AnchorSource.DeathSpot;
 
     public string? PointKey { get; init; }
     public long DiedAtMs { get; init; }
@@ -87,7 +97,7 @@ internal sealed class CollectorSession
 
     public WatchMeter Meter { get; } = new();
 
-    /// <summary>Pack watch: own and party kills of matched spawn points waiting for their respawn.</summary>
+    /// <summary>Pack watch: own and party kills waiting for their respawn, anchored at the respawn spot.</summary>
     public PackWatch Pack { get; } = new();
 
     /// <summary>Pack watch on: kills are added to <see cref="Pack"/>.</summary>
@@ -176,10 +186,12 @@ internal sealed class CollectorSession
 
         enemy.LayoutId = layoutId;
         enemy.FateId = fateId;
-        if (enemy.MatchedVersion < 0 || !enemy.AnchorIsHome && home != null)
+        if (enemy.Home == null && home != null)
+            enemy.Home = home;
+        if (enemy.MatchedVersion < 0 || !enemy.AnchorIsHome && enemy.Home != null)
         {
-            enemy.Anchor = home ?? firstPosition;
-            enemy.AnchorIsHome = home != null;
+            enemy.Anchor = enemy.Home ?? firstPosition;
+            enemy.AnchorIsHome = enemy.Home != null;
         }
 
         enemy.Position = position;
@@ -197,13 +209,17 @@ internal sealed class CollectorSession
         }
     }
 
-    /// <summary>An observed live to HP 0 transition. The timer anchors at the spawn anchor, not the corpse.</summary>
-    public void Died(Guid trackId, uint bnpcId, uint layoutId, Vector3? home, Vector3 firstPosition, ushort fateId)
+    /// <summary>
+    /// An observed live to HP 0 transition at <paramref name="deathPosition"/> (the corpse). The timer anchors at the
+    /// respawn spot (<see cref="SpawnAnchor"/>): the matched row, else the home, and the corpse only when neither exists.
+    /// </summary>
+    public void Died(Guid trackId, uint bnpcId, uint layoutId, Vector3? home, Vector3 deathPosition, ushort fateId)
     {
         live.TryGetValue(trackId, out var enemy);
-        var anchor = enemy?.Anchor ?? home ?? firstPosition;
-        var approximate = enemy is { AnchorIsHome: false } || enemy == null && home == null;
-        var key = enemy?.Match.Point?.Key;
+        var row = enemy?.Match.Point;
+        var resolved = SpawnAnchor.Resolve(row, enemy?.Home ?? home, deathPosition);
+        var anchor = resolved.Position;
+        var key = row?.Key;
         if (enemy != null && enemy.Match.Point != null)
             claimed.Remove(enemy.Match.Point.Key);
         live.Remove(trackId);
@@ -216,7 +232,8 @@ internal sealed class CollectorSession
             BnpcId = bnpcId,
             LayoutId = layoutId,
             Anchor = anchor,
-            AnchorApproximate = approximate,
+            AnchorSource = resolved.Source,
+            HeightKnown = resolved.HeightKnown,
             PointKey = key,
             DiedAtMs = NowMs,
             FateBound = fateId != 0,
@@ -227,23 +244,45 @@ internal sealed class CollectorSession
         AddToPack(death);
     }
 
-    /// <summary>An own or party kill of a matched, non-FATE spawn point joins the pack watch.</summary>
+    /// <summary>The pack watch key of a death: its coverage row, else its track (an unmatched kill).</summary>
+    public static string PackKey(OverlayDeath death) => death.PointKey ?? "track:" + death.TrackId.ToString("N");
+
+    /// <summary>
+    /// An own or party kill of a non-FATE enemy joins the pack watch, anchored exactly like its countdown (the death's
+    /// <see cref="OverlayDeath.Anchor"/>: the matched row, else the home, else the death spot flagged approximate).
+    /// </summary>
     private void AddToPack(OverlayDeath death)
     {
-        if (!PackEnabled || death.DefeatBy == 0 || death.FateBound || death.PointKey == null || snapshot == null ||
-            !snapshot.ByKey.TryGetValue(death.PointKey, out var point))
+        if (!PackEnabled || death.DefeatBy == 0 || death.FateBound)
             return;
+        CoveragePoint? point = null;
+        if (death.PointKey != null)
+            snapshot?.ByKey.TryGetValue(death.PointKey, out point);
         Pack.Killed(new PackPoint
         {
-            Key = point.Key,
-            Name = point.Name,
-            BnpcId = point.BnpcId,
-            Anchor = point.HeightKnown ? new Vector3(point.X, point.Y, point.Z) : death.Anchor with { X = point.X, Z = point.Z },
-            HeightKnown = point.HeightKnown,
-            Condition = point.Condition,
-            AlreadyDone = StatusOf(point, out _) == CoverageStatus.Confirmed,
+            Key = PackKey(death),
+            Name = point?.Name ?? "",
+            BnpcId = point?.BnpcId ?? death.BnpcId,
+            Anchor = death.Anchor,
+            HeightKnown = death.HeightKnown,
+            Source = death.AnchorSource,
+            Condition = point?.Condition ?? "",
+            AlreadyDone = point != null && StatusOf(point, out _) == CoverageStatus.Confirmed,
             DiedAtMs = death.DiedAtMs
         });
+    }
+
+    /// <summary>
+    /// A local confirmation of an unmatched pack point: the same enemy, within the match distance of its anchor, made
+    /// after it died.
+    /// </summary>
+    public bool ConfirmedNear(uint bnpcId, Vector3 anchor, long sinceMs)
+    {
+        foreach (var confirmation in confirmations.Values)
+            if (confirmation.BnpcId == bnpcId && confirmation.AtMs >= sinceMs &&
+                CoverageMatcher.DistanceXz(confirmation.Anchor.X, confirmation.Anchor.Z, anchor.X, anchor.Z) <= OverlayRates.MatchYalms)
+                return true;
+        return false;
     }
 
     /// <summary>A kind 13 defeat notice linked to this track: 1 = your kill, 2 = a party member's.</summary>
@@ -287,8 +326,8 @@ internal sealed class CollectorSession
         if (record.Kind == ObservationKind.EnemyAppeared && record.Respawn is { } respawn)
         {
             foreach (var d in deaths)
-                if (d.TrackId == respawn.PreviousTrackId && d.PointKey != null && Pack.Points.Count > 0)
-                    Pack.Respawned(d.PointKey, NowMs, HasPlayer ? Vector3.Distance(Player, d.Anchor) : float.MaxValue, PackRadius);
+                if (d.TrackId == respawn.PreviousTrackId && Pack.Points.Count > 0)
+                    Pack.Respawned(PackKey(d), NowMs, HasPlayer ? Vector3.Distance(Player, d.Anchor) : float.MaxValue, PackRadius);
             deaths.RemoveAll(d => d.TrackId == respawn.PreviousTrackId);
         }
         var evidence = LocalConfirmation.Evaluate(record);

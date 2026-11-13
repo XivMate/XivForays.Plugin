@@ -95,7 +95,12 @@ What you should see:
   count, "(class, n 248)" the value of all night-only (or weather-only) enemies, "(default)" the ordinary estimate.
 - Measured medians: ordinary enemies about 50 s (51 s measured), night-only enemies 146 s, weather-only enemies
   (sprites) 191 s. So an Ashkin starts at "~146 s" and a sprite at "~191 s", not "~50 s".
-- A clock marker with the same text at the spawn point (not where the corpse fell if you pulled it).
+- A clock marker with the same text at the respawn spot, never where the corpse fell if you pulled it. The spot is,
+  in this order: the matched coverage row; else the enemy's home (where the game created it, read when it first
+  appeared); only when neither exists, the death spot. A walk-past row or the death spot is approximate: the window
+  row and the marker then say "approximate (walk-past spot)" or "approximate (death spot)" in amber.
+- Pull an enemy about 40 y and kill it there: the clock and the distance in the window ("12 y N") point at its spawn,
+  not at the corpse.
 - When the enemy's condition is not met now, no countdown: "Back at night (ET 18:00, in ~12 min)" for a night enemy by
   day, "Needs Blizzard/Snow (next in ~40 min)" for a sprite out of its weather (the same forecast as the site).
 - Night and weather enemies despawn within about 2 s of the change (ET 06:00, or the 8 ET hour weather change), and
@@ -110,7 +115,8 @@ Fail if:
 - An Ashkin or a sprite shows "~50 s".
 - A night enemy by day, or a sprite out of its weather, shows a countdown.
 - The "in ~N min" is clearly off from the site's weather page for the same zone.
-- The timer anchors on the corpse after a pull, or shows exact seconds without the "~".
+- The timer anchors on the corpse after a pull (without the "approximate (death spot)" note), or shows exact seconds
+  without the "~".
 - A timer turns into "Confirmed" or keeps counting after the enemy is back.
 - An enemy that only walked out of view (did not die) gets a timer.
 
@@ -215,8 +221,14 @@ until all have respawned. Then try a pack whose points are more than 2 x 60 y ap
 
 What you should see:
 
-- A small sky blue ring at each spawn point still waiting for its respawn (own and party kills only; deaths you only
-  saw are not part of the pack).
+- A small sky blue ring at each respawn spot still waiting for its respawn (own and party kills only; deaths you only
+  saw are not part of the pack). The rings sit where the enemies will respawn, not where you killed them: pull a pack
+  30 to 40 y and kill it there, and the rings stay at the spawn points. The spot is the same as the section 2 clock:
+  the matched coverage row, else the enemy's home, else (no row and no home) the death spot. Kills with no matched
+  row join the pack too (named "Enemy <id>"), anchored at their home.
+- A ring with a filled centre dot is a spot from a row or a home. A hollow ring (no dot) is approximate: a walk-past
+  row or the death spot, and the second line says "1 approximate (death spot): hollow ring". The map layer draws the
+  same rings at the same spots, hollow or with a dot.
 - A "Best spot" cross (the centre of the smallest circle round the waiting points) and an outline of the safe area:
   where you are within the radius of all of them. Amber while you are outside, green inside. The area shrinks as
   points respawn.
@@ -243,6 +255,8 @@ Fail if:
 - A respawn you watched from inside the area counts as missed.
 - The line says "All good" while a ring is still drawn.
 - Rings or outline segments are drawn across the whole screen.
+- A ring, the best spot or the safe area sits on a corpse after a pull while that enemy has a coverage row or a home
+  (a ring with a centre dot on the corpse).
 
 ## 8. Spawn conditions
 

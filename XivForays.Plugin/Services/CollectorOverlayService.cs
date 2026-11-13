@@ -66,6 +66,7 @@ internal sealed class CollectorOverlayService : IDisposable
     private readonly Vector2[] areaScreen = new Vector2[AreaSegments];
     private readonly bool[] areaOk = new bool[AreaSegments];
     private readonly Vector3[] packPoints = new Vector3[PackWatch.MaxPoints];
+    private readonly bool[] packApproximate = new bool[PackWatch.MaxPoints];
     private readonly SpawnLabels labels = new();
     private readonly MapPoint[] mapPoints = new MapPoint[MapRates.MaxMaxMarkers];
     private readonly MapPointByDistance mapOrder = new();
@@ -293,6 +294,7 @@ internal sealed class CollectorOverlayService : IDisposable
         foreach (var p in watch.Points)
             if (p.Outcome == PackOutcome.Pending && packCount < packPoints.Length)
             {
+                packApproximate[packCount] = p.Approximate;
                 packPoints[packCount++] = p.Anchor;
                 sumY += p.Anchor.Y;
             }
@@ -304,6 +306,7 @@ internal sealed class CollectorOverlayService : IDisposable
 
     private bool IsConfirmedNow(PackPoint p) =>
         session.Confirmations.ContainsKey(p.Key) ||
+        p.Key.StartsWith("track:", StringComparison.Ordinal) && session.ConfirmedNear(p.BnpcId, p.Anchor, p.DiedAtMs) ||
         session.Snapshot?.ByKey.TryGetValue(p.Key, out var row) == true && session.StatusOf(row, out _) == CoverageStatus.Confirmed;
 
     private ZoneSupport Support(uint zone, uint mapId)
@@ -489,12 +492,17 @@ internal sealed class CollectorOverlayService : IDisposable
 
             row.Lost = WatchRules.ContinuityLost(death.MaxPlayerDistance);
             row.Approximate = death.AnchorApproximate;
+            row.HeightKnown = death.HeightKnown;
+            row.Note = SpawnAnchor.Note(death.AnchorSource);
+            row.Label = row.Note.Length == 0 ? row.Timer : row.Timer + "\n" + row.Note;
             row.FateBound = death.FateBound;
             row.Key = death.PointKey;
             row.TrackId = death.TrackId;
             var dx = death.Anchor.X - player.X;
             var dz = death.Anchor.Z - player.Z;
-            row.Distance = Vector3.Distance(death.Anchor, player).ToString("0", CultureInfo.InvariantCulture) + " y " + Compass.Direction(dx, dz);
+            var away = death.HeightKnown ? Vector3.Distance(death.Anchor, player)
+                : CoverageMatcher.DistanceXz(death.Anchor.X, death.Anchor.Z, player.X, player.Z);
+            row.Distance = away.ToString("0", CultureInfo.InvariantCulture) + " y " + Compass.Direction(dx, dz);
         }
     }
 
@@ -521,8 +529,9 @@ internal sealed class CollectorOverlayService : IDisposable
         if (point == null && death == null)
             return;
 
-        var anchor = point != null ? new Vector3(point.X, point.Y, point.Z) : death!.Anchor;
-        var heightKnown = point?.HeightKnown ?? !death!.Approximate;
+        // A death of this point anchors where the countdown does (the same SpawnAnchor); else the row itself.
+        var anchor = death != null ? death.Anchor : new Vector3(point!.X, point.Y, point.Z);
+        var heightKnown = death?.HeightKnown ?? point!.HeightKnown;
         var distance = heightKnown ? Vector3.Distance(anchor, player)
             : CoverageMatcher.DistanceXz(anchor.X, anchor.Z, player.X, player.Z);
         var stood = heightKnown && session.Meter.StoodWithin(anchor, OverlayRates.WatchYalms, now);
@@ -535,7 +544,7 @@ internal sealed class CollectorOverlayService : IDisposable
             distance.ToString("0", CultureInfo.InvariantCulture) + " / 80 y" + (heightKnown ? "" : " (horizontal, height uncertain)"),
             heightKnown ? session.Meter.WithinMs(anchor, OverlayRates.WatchYalms, now) / 5000f : 0f,
             WatchRules.Text(advice) + (death != null && death.Lost ? " | Respawn-watch continuity lost" : ""),
-            death != null ? "Respawn " + death.Timer + (death.Approximate ? " (location approximate)" : "") : "",
+            death != null ? "Respawn " + death.Timer + (death.Note.Length > 0 ? " (location " + death.Note + ")" : "") : "",
             point is { PhotoNeeded: true } ? (distance <= OverlayRates.PhotoYalms ? "Photo still needed: within 70 y" : "Photo still needed: get within 70 y") : "",
             advice == WatchAdvice.MoveCloser);
     }
@@ -771,6 +780,12 @@ internal sealed class CollectorOverlayService : IDisposable
                 ImGui.TextColored(Amber, "lost");
             }
 
+            if (row.Note.Length > 0)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(Amber, row.Note);
+            }
+
             ImGui.TableNextColumn();
             ImGui.TextDisabled(row.Distance);
         }
@@ -905,7 +920,7 @@ internal sealed class CollectorOverlayService : IDisposable
                 var row = deathRows[i];
                 if (Vector3.DistanceSquared(row.Anchor, player) > display2 || !labels.TryClaim(row.Key, row.Anchor))
                     continue;
-                if (Label(list, row.Anchor + new Vector3(0, 2f, 0), row.Timer, Colour(row.DefeatColour, alpha), scale, Shape.Clock, false))
+                if (Label(list, row.Anchor + new Vector3(0, 2f, 0), row.Label, Colour(row.DefeatColour, alpha), scale, Shape.Clock, row.Approximate))
                     budget--;
             }
 
@@ -999,8 +1014,14 @@ internal sealed class CollectorOverlayService : IDisposable
             return;
         var inside = pack.AllInRange;
         var ringColour = Colour(0xFF66D1FFu, alpha);
+        // A spot from the row or the home: ring with a filled centre. An approximate spot (walk-past row or the death
+        // spot): a hollow ring only.
         for (var i = 0; i < packCount; i++)
+        {
             DrawWorldCircle(list, packPoints[i], 2.5f, ringColour, 2.5f);
+            if (!packApproximate[i] && gameGui.WorldToScreen(packPoints[i], out var dot))
+                list.AddCircleFilled(dot, 4f, ringColour);
+        }
 
         if (pack.HasSpot)
         {
@@ -1334,7 +1355,12 @@ internal sealed class CollectorOverlayService : IDisposable
     {
         var ringColour = Colour(0xFF66D1FFu, alpha);
         for (var i = 0; i < packCount; i++)
-            list.AddCircle(view.ToScreen(packPoints[i].X, packPoints[i].Z), 7f, ringColour, 16, 2f);
+        {
+            var at0 = view.ToScreen(packPoints[i].X, packPoints[i].Z);
+            list.AddCircle(at0, 7f, ringColour, 16, 2f);
+            if (!packApproximate[i])
+                list.AddCircleFilled(at0, 3f, ringColour);
+        }
         if (!pack.HasSpot)
             return;
         var areaColour = Colour(pack.AllInRange ? 0xFF7FE07Fu : 0xFF40C0FFu, alpha);
@@ -1532,6 +1558,14 @@ internal sealed class CollectorOverlayService : IDisposable
         public string Distance = "";
         public bool Lost;
         public bool Approximate;
+        public bool HeightKnown = true;
+
+        /// <summary>"approximate (death spot)" or "approximate (walk-past spot)", "" for a row or home anchor.</summary>
+        public string Note = "";
+
+        /// <summary>The in-world clock text: the timer, plus the note on a second line.</summary>
+        public string Label = "";
+
         public bool FateBound;
         public uint DefeatColour => Who == "Your kill" ? 0xFFB0D64Du : 0xFFD0D0D0u;
     }
