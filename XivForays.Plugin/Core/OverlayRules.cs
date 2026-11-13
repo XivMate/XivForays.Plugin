@@ -113,7 +113,46 @@ internal enum MatchKind : byte
     /// <summary>Two candidates tie: no row is chosen.</summary>
     Ambiguous = 4,
     /// <summary>The layout's rows are all another bnpcId: Unknown, never a confirmation.</summary>
-    BnpcMismatch = 5
+    BnpcMismatch = 5,
+
+    /// <summary>A known layout, but none of its spots is within 1.5 y of the anchor: another spot is not recoloured.</summary>
+    NewSpot = 6,
+
+    /// <summary>The layout's only row is held by another live enemy (two of the same layout up at once).</summary>
+    Taken = 7
+}
+
+/// <summary>
+/// The in-world text of an enemy without a coverage row: why it did not match, so the player knows whether anything
+/// can be done. Point keys and rows are never involved; the reason comes from the match kind and the enemy itself.
+/// </summary>
+internal static class UnmatchedText
+{
+    public const string Ambiguous = "Ambiguous";
+    public const string FateEnemy = "FATE enemy: no fixed point";
+    public const string NoLayout = "Unmatched: no layout id";
+    public const string OtherForm = "Unmatched: other form";
+    public const string InUse = "Unmatched: point in use";
+    public const string WatchedNew = "Confirmed locally (new point)";
+    public const string NewSpot = "Not on our map yet";
+    public const string NotOnMap = "Not on our map yet: watch a respawn";
+
+    /// <param name="watchedNew">A local provisional confirmation exists for this enemy (its spawn was watched).</param>
+    public static string For(MatchKind kind, uint layoutId, bool fateBound, bool watchedNew = false)
+    {
+        if (kind == MatchKind.Ambiguous)
+            return Ambiguous;
+        if (layoutId == 0)
+            return fateBound ? FateEnemy : NoLayout;
+        return kind switch
+        {
+            MatchKind.BnpcMismatch => OtherForm,
+            MatchKind.Taken => InUse,
+            _ when watchedNew => WatchedNew,
+            MatchKind.NewSpot => NewSpot,
+            _ => NotOnMap
+        };
+    }
 }
 
 internal readonly record struct PointMatch(CoveragePoint? Point, MatchKind Kind)
@@ -146,7 +185,9 @@ internal static class CoverageMatcher
             if (same == 0)
                 return PointMatch.NoMatch(MatchKind.BnpcMismatch);
             if (same == 1 && layoutRows.Length == 1)
-                return claimed != null && claimed.Contains(only!.Key) ? PointMatch.NoMatch() : new PointMatch(only, MatchKind.Layout);
+                return claimed != null && claimed.Contains(only!.Key)
+                    ? PointMatch.NoMatch(MatchKind.Taken)
+                    : new PointMatch(only, MatchKind.Layout);
             // One layout, several spots (FATE spawners, reused layouts): the anchor decides.
             var chosen = Nearest(layoutRows, bnpcId, anchorX, anchorZ, claimed, out var tie);
             if (tie)
@@ -154,7 +195,7 @@ internal static class CoverageMatcher
             if (chosen != null)
                 return new PointMatch(chosen, MatchKind.LayoutPosition);
             // A new spot of a known layout: do not recolour another spot of it.
-            return PointMatch.NoMatch();
+            return PointMatch.NoMatch(MatchKind.NewSpot);
         }
 
         var near = Nearest(snapshot.WithBnpc(bnpcId), bnpcId, anchorX, anchorZ, claimed, out var tied);

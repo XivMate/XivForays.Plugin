@@ -46,6 +46,10 @@ internal sealed class OverlayDeath
     public bool AnchorApproximate => AnchorSource is AnchorSource.RowApproximate or AnchorSource.DeathSpot;
 
     public string? PointKey { get; init; }
+
+    /// <summary>How the enemy was matched when it died (the reason shown when <see cref="PointKey"/> is null).</summary>
+    public MatchKind MatchKind { get; init; }
+
     public long DiedAtMs { get; init; }
     public bool FateBound { get; init; }
 
@@ -59,6 +63,10 @@ internal sealed class OverlayDeath
 internal sealed class OverlayConfirmation
 {
     public required string Key { get; init; }
+
+    /// <summary>The track whose appearance made it (provisional ones are keyed by it).</summary>
+    public Guid TrackId { get; init; }
+
     public Vector3 Anchor { get; init; }
     public uint BnpcId { get; init; }
     public uint LayoutId { get; init; }
@@ -87,6 +95,8 @@ internal sealed class CollectorSession
     private readonly List<OverlayDeath> deaths = new();
     private readonly Dictionary<string, OverlayConfirmation> confirmations = new(StringComparer.Ordinal);
     private readonly List<string> confirmedDrop = new();
+    // Tracks with a provisional confirmation that has a layout id (no allocation when the labels ask per frame).
+    private readonly HashSet<Guid> watchedNew = new();
     // A defeat notice can name a track before the scan saw it at HP 0.
     private readonly Dictionary<Guid, byte> pendingDefeats = new();
     // Enemy levels seen this session (game data, not visit state): the map tooltip shows them.
@@ -132,6 +142,7 @@ internal sealed class CollectorSession
         claimed.Clear();
         deaths.Clear();
         confirmations.Clear();
+        watchedNew.Clear();
         pendingDefeats.Clear();
         Pack.Clear();
         LastConfirmation = null;
@@ -157,7 +168,8 @@ internal sealed class CollectorSession
             if (ServerConfirms(next, confirmation))
                 confirmedDrop.Add(key);
         foreach (var key in confirmedDrop)
-            confirmations.Remove(key);
+            if (confirmations.Remove(key, out var dropped))
+                watchedNew.Remove(dropped.TrackId);
     }
 
     public void BeginScan(long nowMs, Vector3? player)
@@ -235,6 +247,7 @@ internal sealed class CollectorSession
             AnchorSource = resolved.Source,
             HeightKnown = resolved.HeightKnown,
             PointKey = key,
+            MatchKind = enemy?.Match.Kind ?? MatchKind.None,
             DiedAtMs = NowMs,
             FateBound = fateId != 0,
             MaxPlayerDistance = HasPlayer ? Vector3.Distance(anchor, Player) : 0,
@@ -347,7 +360,7 @@ internal sealed class CollectorSession
         var point = enemy?.Match.Point;
         if (point == null && snapshot != null)
             point = CoverageMatcher.Match(snapshot, bnpc, layout, anchor.X, anchor.Z).Point;
-        var key = point?.Key ?? "local:" + trackId.ToString("N");
+        var key = point?.Key ?? LocalKey(trackId);
         if (confirmations.TryGetValue(key, out var existing))
             return existing;
         if (point is { Status: CoverageStatus.Confirmed })
@@ -357,6 +370,7 @@ internal sealed class CollectorSession
         var confirmation = new OverlayConfirmation
         {
             Key = key,
+            TrackId = trackId,
             Anchor = anchor,
             BnpcId = bnpc,
             LayoutId = layout,
@@ -365,6 +379,8 @@ internal sealed class CollectorSession
             Provisional = point == null
         };
         confirmations[key] = confirmation;
+        if (confirmation is { Provisional: true, NoLayout: false })
+            watchedNew.Add(trackId);
         LastConfirmation = confirmation;
         return confirmation;
     }
@@ -394,6 +410,14 @@ internal sealed class CollectorSession
     }
 
     public bool IsOccupied(CoveragePoint point) => claimed.Contains(point.Key);
+
+    /// <summary>
+    /// The spawn of this unmatched track was watched cleanly with a layout id: a provisional "local:" confirmation that
+    /// the server will turn into a new point.
+    /// </summary>
+    public bool WatchedNewPoint(Guid trackId) => watchedNew.Contains(trackId);
+
+    private static string LocalKey(Guid trackId) => "local:" + trackId.ToString("N");
 
     /// <summary>The level of an enemy as last seen (Eureka: its elemental level), for the map tooltip.</summary>
     public void NoteLevel(uint bnpcId, byte level)

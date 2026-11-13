@@ -179,7 +179,11 @@ What you should see:
 
 - Over each loaded enemy of a needed point: the colour, a short word and a shape. To confirm: amber outlined diamond.
   Walk-past: sky blue circle. Never seen: lavender question mark. Confirmed (only with Show confirmed): teal check.
-  Enemies the overlay cannot tie to a row say "Unmatched" (or "Ambiguous" when two rows tie).
+  Enemies the overlay cannot tie to a row say why: "FATE enemy: no fixed point" (FATE enemies without a layout id),
+  "Not on our map yet: watch a respawn" (a spawn point the map does not have yet), "Not on our map yet" (a new spot
+  of a known layout), "Confirmed locally (new point)" (its spawn was watched: the next refresh adds it),
+  "Unmatched: point in use" (two of one layout up at once), "Unmatched: other form", "Unmatched: no layout id", or
+  "Ambiguous" when two rows tie. The respawn panel of an unmatched kill shows the same reason.
 - A pulled enemy keeps its marker and status while it walks away.
 - Markers only within the display distance (default 100 y) and at most 64 in total.
 - Spawns now only (5 and 6) on: no marker over an enemy tied to a point whose condition is known to be unmet now

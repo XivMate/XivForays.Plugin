@@ -497,6 +497,9 @@ internal sealed class CollectorOverlayService : IDisposable
             row.Label = row.Note.Length == 0 ? row.Timer : row.Timer + "\n" + row.Note;
             row.FateBound = death.FateBound;
             row.Key = death.PointKey;
+            row.Unmatched = point == null
+                ? UnmatchedText.For(death.MatchKind, death.LayoutId, death.FateBound, session.WatchedNewPoint(death.TrackId))
+                : "";
             row.TrackId = death.TrackId;
             var dx = death.Anchor.X - player.X;
             var dz = death.Anchor.Z - player.Z;
@@ -539,7 +542,7 @@ internal sealed class CollectorOverlayService : IDisposable
         var status = point != null ? session.StatusOf(point, out _) : CoverageStatus.Unknown;
         selected = new Target(true, point?.Key, anchor, heightKnown,
             NameOf(point?.Name ?? death?.Name ?? "", point?.BnpcId ?? 0) + (pinnedKey != null && point?.Key == pinnedKey ? " (pinned)" : ""),
-            point != null ? CoverageStatusMap.Label(status) : "Unmatched point",
+            point != null ? CoverageStatusMap.Label(status) : death is { Unmatched.Length: > 0 } ? death.Unmatched : "Unmatched point",
             CoverageStatusMap.Colour(status),
             distance.ToString("0", CultureInfo.InvariantCulture) + " / 80 y" + (heightKnown ? "" : " (horizontal, height uncertain)"),
             heightKnown ? session.Meter.WithinMs(anchor, OverlayRates.WatchYalms, now) / 5000f : 0f,
@@ -897,7 +900,7 @@ internal sealed class CollectorOverlayService : IDisposable
                 if (!labels.TryClaim(enemy.Match.Point?.Key, enemy.Anchor))
                     continue;
                 var text = enemy.Match.Point == null
-                    ? enemy.Match.Kind == MatchKind.Ambiguous ? "Ambiguous" : "Unmatched"
+                    ? UnmatchedText.For(enemy.Match.Kind, enemy.LayoutId, enemy.FateId != 0, session.WatchedNewPoint(enemy.TrackId))
                     : local != null ? "Confirmed locally" : CoverageStatusMap.Label(status);
                 if (Label(list, enemy.Position + new Vector3(0, 2.5f, 0), text, Colour(CoverageStatusMap.Colour(status), alpha), scale,
                         ShapeOf(status), false))
@@ -1567,6 +1570,10 @@ internal sealed class CollectorOverlayService : IDisposable
         public string Label = "";
 
         public bool FateBound;
+
+        /// <summary>Why the death has no coverage row (<see cref="UnmatchedText"/>), "" when it has one.</summary>
+        public string Unmatched = "";
+
         public uint DefeatColour => Who == "Your kill" ? 0xFFB0D64Du : 0xFFD0D0D0u;
     }
 
