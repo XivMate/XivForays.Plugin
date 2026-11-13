@@ -40,6 +40,20 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
   they can be removed on request.
 - The plugin only reads game memory. It does not change the game, send game packets or automate anything.
 
+## Collector overlay (optional, off by default)
+
+The collector overlay (General, **Collector overlay**, from 0.0.0.16) **downloads public coverage only and sends
+nothing**:
+
+- While it is on and you are in Anemos, Pagos, Pyros or Hydatos (not the Baldesion Arsenal), it downloads that zone's
+  public coverage file from beta.xivforays.com about every 3 minutes. The request carries no API key, no cookies and
+  nothing about you: no name, world, position or visit. Like any web request, the site sees your IP address and which
+  zone file was asked for.
+- The last good file is saved in the plugin's own folder (public data only) so the overlay also works offline.
+- What it shows (timers, distances, "Confirmed locally") is worked out on your PC and kept in memory only. It is not
+  uploaded, and it does not change what the plugin records.
+- With the master switch off there are no downloads at all.
+
 ## Turning it off
 
 Untick **Crowdsource data** in `/xivforays config`. Uploads stop at once, and anything not yet sent is dropped.
