@@ -221,46 +221,54 @@ Fail if:
 
 What to do: tick **7. Pack watch** (Keep within: 60 y by default, 50 to 80 y; a margin under the 80 y rule). Kill a
 pack of 4 or 5 enemies at needed points (party kills count too). Walk away from all of them, then follow the advice
-until all have respawned. Then try a pack whose points are more than 2 x 60 y apart.
+until all have respawned. Then try a pack whose points are more than 2 x 60 y apart, and (at dusk or near a weather
+change) a pack with a night-only or weather enemy in it.
 
 What you should see:
 
-- A small sky blue ring at each respawn spot still waiting for its respawn (own and party kills only; deaths you only
-  saw are not part of the pack). The rings sit where the enemies will respawn, not where you killed them: pull a pack
-  30 to 40 y and kill it there, and the rings stay at the spawn points. The spot is the same as the section 2 clock:
-  the matched coverage row, else the enemy's home, else (no row and no home) the death spot. Kills with no matched
-  row join the pack too (named "Enemy <id>"), anchored at their home.
-- A ring with a filled centre dot is a spot from a row or a home. A hollow ring (no dot) is approximate: a walk-past
-  row or the death spot, and the second line says "1 approximate (death spot): hollow ring". The map layer draws the
-  same rings at the same spots, hollow or with a dot.
-- A "Best spot" cross (the centre of the smallest circle round the waiting points) and an outline of the safe area:
-  where you are within the radius of all of them. Amber while you are outside, green inside. The area shrinks as
-  points respawn.
+- ONE area on the ground: an outline with a faint fill, the area you can walk in and still be within the radius of
+  every respawn spot still waiting (where all their circles overlap). Amber while you are outside it, green inside.
+  It shrinks or grows as points respawn or drop out. No ring per enemy by default.
+- The area is built from where the enemies will respawn, not where you killed them: pull a pack 30 to 40 y and kill
+  it there, and the area stays round the spawn points. The spot of each enemy is the same as the section 2 clock: the
+  matched coverage row, else the enemy's home, else (no row and no home) the death spot. Kills with no matched row
+  join the pack too (named "Enemy <id>"), anchored at their home.
+- A "Best spot" cross in the area (the centre of the smallest circle round the waiting points).
+- The fill is drawn ahead of you when you stand inside the area too (a part behind the camera is left out, never
+  stretched across the screen).
+- **Ring at each spawn point** (off by default, under Pack watch): also a small sky blue ring at each waiting spot,
+  with a filled centre dot for a row or home spot, hollow (no dot) when approximate (a walk-past row or the death spot).
+  Without the rings, the second line still says "1 approximate (death spot)".
 - One status line, in the window and at the top of the screen:
-  - "Pack watch: in range of 4/5, move 12 y NE" while you are outside the safe area (walk that far towards the best
-    spot);
+  - "Pack watch: in range of 4/5, move 12 y NE" while you are outside the area (walk that far towards the best spot);
   - "In range of all 5, waiting: next ~20 s" inside it (the soonest estimated respawn of the waiting points, from the
     same estimates as section 2);
   - "All good: 5 of 5 respawned, 4 confirmed, 1 already done. Move on." when all are back. Points that were already
     Confirmed when killed count as "already done" and are not waited for.
 - A second line "1 missed: <name>" when a point respawned without a confirmation (usually because you were out of
   range). Then the "Move on." is left out.
-- A point leaves the waiting set when it respawns, when its condition ends (night or weather), or after 5 minutes
-  ("2 dropped (condition ended or 5 min)").
-- Too far apart: "Pack watch: no spot covers all 3: <A> and <B> are 140 y apart. Split: <A>, <C> | <B>" and no safe
-  area. Watch one group, then the other.
+- A point whose condition ends (a night enemy such as Ashkin when day comes, a weather enemy such as a sprite when the
+  weather is over) leaves the pack at once, on the next update: the area grows to the remaining points and the second
+  line names it once, "dropped: Ashkin (day)" ("dropped: Sprite (weather over)", "dropped: Ashkin x2 (day)" for two of
+  the same). It is never counted as missed. A point also drops after 5 minutes: "dropped: <name> (5 min)". FATE
+  enemies are not part of the pack.
+- Too far apart (no spot covers all): the area that covers the most of them is drawn, and the line says which are left
+  out: "Pack watch: no spot covers all 5, area covers 3, left out: <D>, <E>", with ". Move 12 y NE" while you are
+  outside that area. Watch that group, then the others.
 - The next kill after "All good" starts a new pack.
 - **Single-point 80 y / 70 y rings** (off by default, under Pack watch): the old sky blue "80 y watch" and amber
   "70 y photo" rings round the selected point only, at your own height.
 
 Fail if:
 
-- You stand inside the drawn safe area and the line does not say "In range of all".
-- A respawn you watched from inside the area counts as missed.
-- The line says "All good" while a ring is still drawn.
-- Rings or outline segments are drawn across the whole screen.
-- A ring, the best spot or the safe area sits on a corpse after a pull while that enemy has a coverage row or a home
-  (a ring with a centre dot on the corpse).
+- You stand inside the drawn area and the line does not say "In range of all" (or, when some are left out, still says
+  "Move").
+- More than one area is drawn, or a ring per enemy shows while **Ring at each spawn point** is off.
+- A respawn you watched from inside the area counts as missed, or a dropped point (condition ended) counts as missed.
+- A night or weather enemy stays in the pack (and in the area) for more than a second or two after its condition ends.
+- The line says "All good" while the area is still drawn.
+- The fill or outline is drawn across the whole screen, flickers in stripes, or shows seams between its pieces.
+- The area sits round a corpse after a pull while that enemy has a coverage row or a home.
 
 ## 8. Spawn conditions
 
@@ -323,8 +331,9 @@ What you should see:
 - **Pending respawn only**: only the points of enemies that died recently and are waiting to respawn, each with a green
   ring; a point leaves as soon as its enemy is back. FATE enemies are not included.
 - The picked row: a large cyan ring with a cross, shown even when its status box is off or the cap is reached.
-- Pack watch: sky blue rings on the waiting points, the safe area outline (amber outside, green inside) and the best
-  spot cross, the same as in the world.
+- Pack watch: the same ONE area as on the ground (faint fill and outline, amber outside, green inside; the area that
+  covers the most when no spot covers all) and the best spot cross. No ring per enemy unless **Ring at each spawn
+  point** is on.
 - Closing the map removes everything at once; framerate does not drop with the map open.
 
 Fail if:

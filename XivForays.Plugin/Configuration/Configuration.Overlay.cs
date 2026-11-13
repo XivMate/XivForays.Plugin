@@ -42,6 +42,9 @@ public partial class Configuration
     /// <summary>7. Pack watch keep-within radius (yalms, 50 to 80, default 60: a margin under the 80 y rule).</summary>
     public float OverlayPackRadius { get; set; } = PackWatch.DefaultRadius;
 
+    /// <summary>7. Pack watch: a small ring at each waiting spawn point as well as the one area (off by default).</summary>
+    public bool OverlayPackRings { get; set; } = false;
+
     /// <summary>Single-point ground circles (80 y watch, 70 y photo) around the selected point, under Pack watch.</summary>
     public bool OverlayRings { get; set; } = false;
 
@@ -137,7 +140,8 @@ public partial class Configuration
             OverlayMapPendingOnly),
         Math.Clamp(OverlayMapMaxMarkers, MapRates.MinMaxMarkers, MapRates.MaxMaxMarkers),
         OverlayEnabled && OverlayNearbyList && OverlayListSpawnsNow,
-        OverlayEnabled && OverlayWorldSpawnsNow);
+        OverlayEnabled && OverlayWorldSpawnsNow,
+        OverlayEnabled && OverlayPackWatch && OverlayPackRings);
 }
 
 /// <summary>The overlay settings as one value (master switch already applied to each feature).</summary>
@@ -166,7 +170,8 @@ internal readonly record struct OverlayFeatures(
     MapFilter MapFilter,
     int MapMaxMarkers,
     bool ListSpawnsNow,
-    bool WorldSpawnsNow)
+    bool WorldSpawnsNow,
+    bool PackRings = false)
 {
     /// <summary>The coverage file is downloaded only when the master switch is on.</summary>
     public bool NeedsDownload => Enabled;

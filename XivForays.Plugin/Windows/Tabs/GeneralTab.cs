@@ -132,7 +132,7 @@ internal class GeneralTab(
         }
 
         changed |= Box("7. Pack watch##OverlayPackWatch", configuration.OverlayPackWatch, v => configuration.OverlayPackWatch = v,
-            "After you (or your party) kill a pack: a ring at each spawn point waiting for its respawn, the best spot to stand and the area from where all of them are within the radius below, and one status line until all of them are back.");
+            "After you (or your party) kill a pack: one area on the ground (and on the map) from where every spawn point still waiting for its respawn is within the radius below, the best spot in it, and one status line until all of them are back. When no spot covers all of them, the area covers the most and the line says which are left out.");
         ImGui.Indent();
         if (configuration.OverlayPackWatch)
         {
@@ -143,6 +143,9 @@ internal class GeneralTab(
                 configuration.OverlayPackRadius = radius;
                 changed = true;
             }
+
+            changed |= Box("Ring at each spawn point##OverlayPackRings", configuration.OverlayPackRings, v => configuration.OverlayPackRings = v,
+                "Also a small ring at each waiting spawn point (a filled centre for a row or home spot, hollow when approximate). Off: only the one area.");
         }
 
         changed |= Box("Single-point 80 y / 70 y rings##OverlayRings", configuration.OverlayRings, v => configuration.OverlayRings = v,

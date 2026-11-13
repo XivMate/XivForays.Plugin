@@ -32,6 +32,9 @@ internal sealed class CollectorOverlayService : IDisposable
     private const int MaxDeathRows = 5;
     private const int RingSegments = 48;
     private const int AreaSegments = 64;
+
+    /// <summary>The pack area fill is cut into this many bands from the centre out, so a part behind the camera drops only its band.</summary>
+    private const int AreaBands = 4;
     private const int GuideSteps = 24;
     private const int SmallRingSegments = 16;
     private static readonly Vector4 Amber = new(1f, 0.82f, 0.4f, 1f);
@@ -63,8 +66,9 @@ internal sealed class CollectorOverlayService : IDisposable
     private readonly Vector2[] ring = new Vector2[RingSegments + 1];
     private readonly bool[] ringOk = new bool[RingSegments + 1];
     private readonly Vector2[] area = new Vector2[AreaSegments];
-    private readonly Vector2[] areaScreen = new Vector2[AreaSegments];
-    private readonly bool[] areaOk = new bool[AreaSegments];
+    private readonly Vector2[] fillScreen = new Vector2[AreaSegments * AreaBands];
+    private readonly bool[] fillOk = new bool[AreaSegments * AreaBands];
+    private readonly Vector2[] mapArea = new Vector2[AreaSegments];
     private readonly Vector3[] packPoints = new Vector3[PackWatch.MaxPoints];
     private readonly bool[] packApproximate = new bool[PackWatch.MaxPoints];
     private readonly SpawnLabels labels = new();
@@ -276,7 +280,9 @@ internal sealed class CollectorOverlayService : IDisposable
         if (!features.PackWatch)
             return;
         var watch = session.Pack;
-        watch.Expire(now, p => RespawnTimer.HoldsNow(territory, p.Condition, unixNow));
+        // A point whose condition ended leaves at once (this tick) and is named once as dropped, never as missed.
+        var nightNow = EorzeaClock.IsNight(unixNow);
+        watch.Expire(now, p => RespawnTimer.HoldsNow(territory, p.Condition, unixNow), p => PackWatch.EndReason(p.Condition, nightNow));
         var next = -1;
         foreach (var p in watch.Points)
         {
@@ -301,7 +307,7 @@ internal sealed class CollectorOverlayService : IDisposable
 
         packY = packCount > 0 ? sumY / packCount : player.Y;
         if (pack.HasSpot)
-            PackGeometry.Outline(watch.PendingXz, pack.Spot, features.PackRadius, area);
+            PackGeometry.Outline(watch.AreaXz, pack.Spot, features.PackRadius, area);
     }
 
     private bool IsConfirmedNow(PackPoint p) =>
@@ -1010,32 +1016,41 @@ internal sealed class CollectorOverlayService : IDisposable
         list.AddText(labelAt, colour, pointerEdgeText);
     }
 
-    /// <summary>Pack watch drawing: a small ring at each waiting spawn point, the safe area outline, the best spot and the status text.</summary>
+    /// <summary>
+    /// Pack watch drawing: one area on the ground (outline and a faint fill: from there every waiting spawn point is
+    /// within the radius, or the most of them when no spot covers all), the best spot, the status text, and only when
+    /// the option is on a small ring at each waiting point.
+    /// </summary>
     private void DrawPack(ImDrawListPtr list, float alpha)
     {
         if (pack.Line.Length == 0)
             return;
-        var inside = pack.AllInRange;
-        var ringColour = Colour(0xFF66D1FFu, alpha);
-        // A spot from the row or the home: ring with a filled centre. An approximate spot (walk-past row or the death
-        // spot): a hollow ring only.
-        for (var i = 0; i < packCount; i++)
+        if (features.PackRings)
         {
-            DrawWorldCircle(list, packPoints[i], 2.5f, ringColour, 2.5f);
-            if (!packApproximate[i] && gameGui.WorldToScreen(packPoints[i], out var dot))
-                list.AddCircleFilled(dot, 4f, ringColour);
+            var ringColour = Colour(0xFF66D1FFu, alpha);
+            // A spot from the row or the home: ring with a filled centre. An approximate spot (walk-past row or the death
+            // spot): a hollow ring only.
+            for (var i = 0; i < packCount; i++)
+            {
+                DrawWorldCircle(list, packPoints[i], 2.5f, ringColour, 2.5f);
+                if (!packApproximate[i] && gameGui.WorldToScreen(packPoints[i], out var dot))
+                    list.AddCircleFilled(dot, 4f, ringColour);
+            }
         }
 
         if (pack.HasSpot)
         {
-            var areaColour = Colour(inside ? 0xFF7FE07Fu : 0xFF40C0FFu, alpha * 0.9f);
-            for (var i = 0; i < AreaSegments; i++)
-                areaOk[i] = gameGui.WorldToScreen(new Vector3(area[i].X, packY, area[i].Y), out areaScreen[i]);
+            var areaRgb = pack.InArea ? 0xFF7FE07Fu : 0xFF40C0FFu;
+            var areaColour = Colour(areaRgb, alpha * 0.9f);
+            DrawAreaFill(list, Colour(areaRgb, alpha * 0.14f));
+            // Outline: the outer band of the fill. A point in front of the camera projects correctly even off screen
+            // (ImGui clips the line); a point behind it drops its two segments.
+            const int outer = (AreaBands - 1) * AreaSegments;
             for (var i = 0; i < AreaSegments; i++)
             {
                 var j = (i + 1) % AreaSegments;
-                if (areaOk[i] && areaOk[j])
-                    list.AddLine(areaScreen[i], areaScreen[j], areaColour, 2.5f);
+                if (fillOk[outer + i] && fillOk[outer + j])
+                    list.AddLine(fillScreen[outer + i], fillScreen[outer + j], areaColour, 2.5f);
             }
 
             if (gameGui.WorldToScreen(new Vector3(pack.Spot.X, packY, pack.Spot.Y), out var at))
@@ -1053,7 +1068,7 @@ internal sealed class CollectorOverlayService : IDisposable
 
         // The status line on screen, top centre.
         var viewport = ImGui.GetMainViewport();
-        var colour = pack.Done ? 0xFF99E673u : inside ? 0xFFFFFFFFu : 0xFF66D1FFu;
+        var colour = pack.Done ? 0xFF99E673u : pack.AllInRange ? 0xFFFFFFFFu : 0xFF66D1FFu;
         var lineSize = ImGui.CalcTextSize(pack.Line);
         var detailSize = pack.Detail.Length > 0 ? ImGui.CalcTextSize(pack.Detail) : Vector2.Zero;
         var top = viewport.Pos.Y + viewport.Size.Y * 0.12f;
@@ -1353,25 +1368,33 @@ internal sealed class CollectorOverlayService : IDisposable
         return text;
     }
 
-    /// <summary>Pack watch on the map: the waiting points, the safe area outline and the best spot.</summary>
+    /// <summary>
+    /// Pack watch on the map: the same one area as on the ground (faint fill and outline) and the best spot; a ring at
+    /// each waiting point only when the option is on.
+    /// </summary>
     private void DrawPackOnMap(ImDrawListPtr list, MapView view, float alpha)
     {
-        var ringColour = Colour(0xFF66D1FFu, alpha);
-        for (var i = 0; i < packCount; i++)
+        if (features.PackRings)
         {
-            var at0 = view.ToScreen(packPoints[i].X, packPoints[i].Z);
-            list.AddCircle(at0, 7f, ringColour, 16, 2f);
-            if (!packApproximate[i])
-                list.AddCircleFilled(at0, 3f, ringColour);
+            var ringColour = Colour(0xFF66D1FFu, alpha);
+            for (var i = 0; i < packCount; i++)
+            {
+                var at0 = view.ToScreen(packPoints[i].X, packPoints[i].Z);
+                list.AddCircle(at0, 7f, ringColour, 16, 2f);
+                if (!packApproximate[i])
+                    list.AddCircleFilled(at0, 3f, ringColour);
+            }
         }
+
         if (!pack.HasSpot)
             return;
-        var areaColour = Colour(pack.AllInRange ? 0xFF7FE07Fu : 0xFF40C0FFu, alpha);
+        var areaRgb = pack.InArea ? 0xFF7FE07Fu : 0xFF40C0FFu;
+        var areaColour = Colour(areaRgb, alpha);
         for (var i = 0; i < AreaSegments; i++)
-        {
-            var j = (i + 1) % AreaSegments;
-            list.AddLine(view.ToScreen(area[i].X, area[i].Y), view.ToScreen(area[j].X, area[j].Y), areaColour, 2f);
-        }
+            mapArea[i] = view.ToScreen(area[i].X, area[i].Y);
+        list.AddConvexPolyFilled(ref mapArea[0], AreaSegments, Colour(areaRgb, alpha * 0.18f));
+        for (var i = 0; i < AreaSegments; i++)
+            list.AddLine(mapArea[i], mapArea[(i + 1) % AreaSegments], areaColour, 2f);
 
         var at = view.ToScreen(pack.Spot.X, pack.Spot.Y);
         list.AddLine(at - new Vector2(5, 5), at + new Vector2(5, 5), areaColour, 2.5f);
@@ -1413,6 +1436,54 @@ internal sealed class CollectorOverlayService : IDisposable
                 break;
         }
     }
+
+    /// <summary>
+    /// The faint fill of the pack area on the ground. The area is convex: it is fanned from the best spot and each
+    /// wedge cut into <see cref="AreaBands"/> bands, every piece drawn only when all its corners are in front of the
+    /// camera (so standing inside the area still fills what is ahead). A point in front but off screen keeps its
+    /// projection and ImGui clips it. Anti-aliased fill is off for the pieces so shared edges leave no seams. Also
+    /// fills <see cref="fillScreen"/>, whose outer band is the outline. No allocation.
+    /// </summary>
+    private void DrawAreaFill(ImDrawListPtr list, uint colour)
+    {
+        var centreOk = Front(new Vector3(pack.Spot.X, packY, pack.Spot.Y), out var centreScreen);
+        for (var band = 0; band < AreaBands; band++)
+        {
+            var t = (band + 1) / (float)AreaBands;
+            for (var i = 0; i < AreaSegments; i++)
+            {
+                var at = pack.Spot + (area[i] - pack.Spot) * t;
+                var k = band * AreaSegments + i;
+                fillOk[k] = Front(new Vector3(at.X, packY, at.Y), out fillScreen[k]);
+            }
+        }
+
+        ref var flags = ref list.Flags;
+        var saved = flags;
+        flags &= ~ImDrawListFlags.AntiAliasedFill;
+        for (var i = 0; i < AreaSegments; i++)
+        {
+            var j = (i + 1) % AreaSegments;
+            if (centreOk && fillOk[i] && fillOk[j])
+                list.AddTriangleFilled(centreScreen, fillScreen[i], fillScreen[j], colour);
+            for (var band = 1; band < AreaBands; band++)
+            {
+                var ii = (band - 1) * AreaSegments + i;
+                var ij = (band - 1) * AreaSegments + j;
+                var oi = band * AreaSegments + i;
+                var oj = band * AreaSegments + j;
+                if (fillOk[ii] && fillOk[ij] && fillOk[oi] && fillOk[oj])
+                    list.AddQuadFilled(fillScreen[ii], fillScreen[oi], fillScreen[oj], fillScreen[ij], colour);
+            }
+        }
+
+        flags = saved;
+    }
+
+    /// <summary>The projection of a world point that is in front of the camera (on or off screen), finite.</summary>
+    private bool Front(Vector3 world, out Vector2 screen) =>
+        gameGui.WorldToScreen(world, out screen, out _) && float.IsFinite(screen.X) && float.IsFinite(screen.Y) &&
+        MathF.Abs(screen.X) < 1e5f && MathF.Abs(screen.Y) < 1e5f;
 
     /// <summary>A flat circle at the point's own height (16 segments, failed projections skipped).</summary>
     private void DrawWorldCircle(ImDrawListPtr list, Vector3 centre, float radius, uint colour, float thickness)

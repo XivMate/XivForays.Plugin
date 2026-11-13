@@ -361,8 +361,11 @@ public class OverlayRoundOneFixTests
         watch.Killed(Kill("b", "Wildebeest", 140, 0, 0));
         watch.Killed(Kill("c", "Fluturini", 10, 5, 0));
         var status = watch.Status(Vector3.Zero, 60, 1000, _ => false, 10);
-        Assert.False(status.HasSpot);
-        Assert.Equal("Pack watch: no spot covers all 3: Anubys and Wildebeest are 140 y apart. Split: Anubys, Fluturini | Wildebeest", status.Line);
+        // Standing at Anubys: inside the area of Anubys and Fluturini, so no walk advice.
+        Assert.True(status.HasSpot);
+        Assert.True(status.InArea);
+        Assert.Equal("Pack watch: no spot covers all 3, area covers 2, left out: Wildebeest", status.Line);
+        Assert.Equal(new[] { new Vector2(0, 0), new Vector2(10, 5) }, watch.AreaXz);
     }
 
     [Fact]
@@ -377,7 +380,8 @@ public class OverlayRoundOneFixTests
         watch.Expire(PackWatch.KeepMs + 1, _ => true);
         Assert.Equal(PackOutcome.TimedOut, watch.Points[1].Outcome);
         var status = watch.Status(Vector3.Zero, 60, PackWatch.KeepMs + 1, _ => false, -1);
-        Assert.Equal("All good: 0 of 2 respawned, 0 confirmed, 0 already done. 2 dropped (condition ended or 5 min). Move on.", status.Line);
+        Assert.Equal("All good: 0 of 2 respawned, 0 confirmed, 0 already done. Move on.", status.Line);
+        Assert.Equal("dropped: Zombie Brobinyak (day), Val Keeper (5 min)", status.Detail);
     }
 
     [Fact]
@@ -477,7 +481,7 @@ public class OverlayRoundOneFixTests
         Assert.Equal(AnchorSource.DeathSpot, point.Source);
         Assert.True(point.Approximate);
         var status = session.Pack.Status(new Vector3(110, 10, 200), 60, 2000, _ => false, -1);
-        Assert.Equal("1 approximate (death spot): hollow ring", status.Detail);
+        Assert.Equal("1 approximate (death spot)", status.Detail);
 
         // Its respawn (linked to the dead track) still clears it.
         session.BeginScan(60_000, new Vector3(110, 10, 200));

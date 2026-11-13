@@ -141,6 +141,69 @@ internal static class PackGeometry
 
         return best;
     }
+
+    /// <summary>
+    /// The outline of the intersection of the circles (radius <paramref name="radius"/> round each point): the area
+    /// from where every point is within the radius. Convex, traced from the centre of the enclosing circle (which lies
+    /// inside it whenever it is not empty). False and nothing written when the intersection is empty (or no points).
+    /// Coincident points and circles that do not cut the area (nested) leave the outline unchanged.
+    /// </summary>
+    public static bool IntersectionOutline(IReadOnlyList<Vector2> points, float radius, Span<Vector2> outline, out Vector2 inside)
+    {
+        var (centre, mec) = EnclosingCircle(points);
+        inside = centre;
+        if (mec < 0 || mec > radius + 1e-3f)
+            return false;
+        Outline(points, centre, radius, outline);
+        return true;
+    }
+
+    /// <summary>
+    /// The largest set of points one spot can keep within the radius, for when no spot covers all of them. The best
+    /// spot is at a point or where two circles cross, so only those are tried (no allocation: <paramref name="chosen"/>
+    /// is refilled with the indices). Ties keep the earliest candidate. Returns the count.
+    /// </summary>
+    public static int BestCover(IReadOnlyList<Vector2> points, float radius, List<int> chosen)
+    {
+        chosen.Clear();
+        if (points.Count == 0)
+            return 0;
+        var bestAt = points[0];
+        var best = -1;
+        for (var i = 0; i < points.Count; i++)
+        {
+            Try(points[i]);
+            for (var j = i + 1; j < points.Count; j++)
+            {
+                var d = Vector2.Distance(points[i], points[j]);
+                if (d > 2f * radius || d < 1e-4f)
+                    continue;
+                var mid = (points[i] + points[j]) / 2f;
+                var h = MathF.Sqrt(MathF.Max(0f, radius * radius - d * d / 4f));
+                var across = new Vector2(-(points[j].Y - points[i].Y), points[j].X - points[i].X) / d;
+                Try(mid + across * h);
+                Try(mid - across * h);
+            }
+        }
+
+        for (var i = 0; i < points.Count; i++)
+            if (Vector2.Distance(points[i], bestAt) <= radius + 1e-2f)
+                chosen.Add(i);
+        return chosen.Count;
+
+        void Try(Vector2 at)
+        {
+            var n = 0;
+            foreach (var p in points)
+                if (Vector2.Distance(p, at) <= radius + 1e-2f)
+                    n++;
+            if (n > best)
+            {
+                best = n;
+                bestAt = at;
+            }
+        }
+    }
 }
 
 /// <summary>Why a pack point left the waiting set.</summary>
@@ -181,6 +244,9 @@ internal sealed class PackPoint
 
     /// <summary>The player was beyond the keep-within radius when it respawned.</summary>
     public bool OutOfRangeAtRespawn { get; set; }
+
+    /// <summary>Why it was dropped ("day", "night", "weather over", "FATE over", "5 min"), "" while not dropped.</summary>
+    public string DropReason { get; set; } = "";
 }
 
 /// <summary>The status of the pack for the window and the screen text.</summary>
@@ -191,7 +257,9 @@ internal readonly record struct PackStatus(
     bool HasSpot,
     Vector2 Spot,
     bool AllInRange,
-    bool Done);
+    bool Done,
+    bool InArea = false,
+    bool Partial = false);
 
 /// <summary>
 /// The set of recently killed spawn points (own and party kills) waiting for their respawn. A point leaves the
@@ -213,6 +281,9 @@ internal sealed class PackWatch
     private readonly List<PackPoint> points = new();
     private readonly List<Vector2> scratch = new();
     private readonly List<PackPoint> scratchPoints = new();
+    private readonly List<Vector2> areaXz = new();
+    private readonly List<int> chosen = new();
+    private readonly bool[] covered = new bool[MaxPoints];
 
     public IReadOnlyList<PackPoint> Points => points;
 
@@ -255,7 +326,14 @@ internal sealed class PackWatch
     }
 
     /// <summary>Drops points whose condition ended or that waited 5 minutes.</summary>
-    public void Expire(long nowMs, Func<PackPoint, bool> conditionHolds)
+    public void Expire(long nowMs, Func<PackPoint, bool> conditionHolds) => Expire(nowMs, conditionHolds, null);
+
+    /// <summary>
+    /// Drops points whose condition ended (at once, on the first tick it no longer holds) or that waited 5 minutes. A
+    /// dropped point is never counted as missed. <paramref name="reason"/> words why its condition ended (default from
+    /// the condition text alone).
+    /// </summary>
+    public void Expire(long nowMs, Func<PackPoint, bool> conditionHolds, Func<PackPoint, string>? reason)
     {
         foreach (var p in points)
         {
@@ -265,13 +343,30 @@ internal sealed class PackWatch
             {
                 p.Outcome = PackOutcome.TimedOut;
                 p.ResolvedAtMs = nowMs;
+                p.DropReason = "5 min";
             }
             else if (!conditionHolds(p))
             {
                 p.Outcome = PackOutcome.ConditionEnded;
                 p.ResolvedAtMs = nowMs;
+                p.DropReason = reason?.Invoke(p) ?? EndReason(p.Condition, null);
             }
         }
+    }
+
+    /// <summary>
+    /// Why a condition no longer holds, in a word: a night enemy at day says "day", a day enemy at night "night", a
+    /// weather enemy "weather over", a FATE enemy "FATE over". <paramref name="nightNow"/> null: not known.
+    /// </summary>
+    public static string EndReason(string condition, bool? nightNow)
+    {
+        if (!SpawnCondition.TryParse(condition, out var parsed))
+            return "condition over";
+        if (parsed.Night is { } wantNight && (nightNow == null ? parsed.Weathers == null : nightNow != wantNight))
+            return wantNight ? "day" : "night";
+        if (parsed.Weathers != null)
+            return "weather over";
+        return parsed.Fate ? "FATE over" : "condition over";
     }
 
     /// <summary>
@@ -280,6 +375,7 @@ internal sealed class PackWatch
     /// </summary>
     public PackStatus Status(Vector3 player, float radius, long nowMs, Func<PackPoint, bool> confirmed, int nextSeconds)
     {
+        areaXz.Clear();
         if (points.Count == 0)
             return new PackStatus("", "", 0, false, default, false, false);
         scratch.Clear();
@@ -312,18 +408,21 @@ internal sealed class PackWatch
                     else if (nowMs - p.ResolvedAtMs > ConfirmGraceMs)
                     {
                         missedCount++;
-                        missed.Append(missed.Length == 0 ? "" : ", ").Append(p.Name.Length > 0 ? p.Name : "Enemy " + p.BnpcId.ToString(CultureInfo.InvariantCulture));
+                        missed.Append(missed.Length == 0 ? "" : ", ").Append(NameOf(p));
                     }
 
                     break;
                 case PackOutcome.ConditionEnded:
                 case PackOutcome.TimedOut:
+                    // Never missed: the point is out of the pack and named once in the dropped list.
                     dropped++;
                     break;
             }
         }
 
         var missedText = missedCount == 0 ? "" : missedCount.ToString(CultureInfo.InvariantCulture) + " missed: " + missed;
+        if (dropped > 0)
+            missedText += (missedText.Length > 0 ? " | " : "") + DroppedText();
         var pending = scratch.Count;
         var approximate = 0;
         var deathSpots = 0;
@@ -337,7 +436,7 @@ internal sealed class PackWatch
 
         if (approximate > 0)
             missedText += (missedText.Length > 0 ? " | " : "") + approximate.ToString(CultureInfo.InvariantCulture) +
-                          (deathSpots == approximate ? " approximate (death spot)" : " approximate") + ": hollow ring";
+                          (deathSpots == approximate ? " approximate (death spot)" : " approximate");
         var total = points.Count - alreadyDone;
         if (pending == 0)
         {
@@ -346,7 +445,6 @@ internal sealed class PackWatch
             var line = "All good: " + respawned.ToString(CultureInfo.InvariantCulture) + " of " + total.ToString(CultureInfo.InvariantCulture) +
                        " respawned, " + newlyConfirmed.ToString(CultureInfo.InvariantCulture) + " confirmed, " +
                        alreadyDone.ToString(CultureInfo.InvariantCulture) + " already done." +
-                       (dropped > 0 ? " " + dropped.ToString(CultureInfo.InvariantCulture) + " dropped (condition ended or 5 min)." : "") +
                        (missedCount == 0 ? " Move on." : "");
             return new PackStatus(line, missedText, 0, false, default, false, true);
         }
@@ -355,23 +453,41 @@ internal sealed class PackWatch
         var playerXz = new Vector2(player.X, player.Z);
         if (mec > radius)
         {
-            var (a, b, d) = PackGeometry.FarthestPair(scratch);
-            var near = new StringBuilder();
-            var far = new StringBuilder();
-            for (var i = 0; i < scratch.Count; i++)
+            // No spot covers all: the area that covers the most of them, and which are left out.
+            PackGeometry.BestCover(scratch, radius, chosen);
+            Array.Clear(covered);
+            foreach (var i in chosen)
             {
-                var toA = Vector2.Distance(scratch[i], scratch[a]);
-                var toB = Vector2.Distance(scratch[i], scratch[b]);
-                var target = toA <= toB ? near : far;
-                target.Append(target.Length == 0 ? "" : ", ").Append(NameOf(scratchPoints[i]));
+                covered[i] = true;
+                areaXz.Add(scratch[i]);
             }
 
-            var line = "Pack watch: no spot covers all " + pending.ToString(CultureInfo.InvariantCulture) + ": " + NameOf(scratchPoints[a]) +
-                       " and " + NameOf(scratchPoints[b]) + " are " + d.ToString("0", CultureInfo.InvariantCulture) + " y apart. Split: " +
-                       near + " | " + far;
-            return new PackStatus(line, missedText, pending, false, centre, false, false);
+            var (spot, _) = PackGeometry.EnclosingCircle(areaXz);
+            var left = new StringBuilder();
+            var inChosen = 0;
+            for (var i = 0; i < scratch.Count; i++)
+            {
+                if (!covered[i])
+                    left.Append(left.Length == 0 ? "" : ", ").Append(NameOf(scratchPoints[i]));
+                else if (DistanceTo(scratchPoints[i], player) <= radius)
+                    inChosen++;
+            }
+
+            var inArea = inChosen == chosen.Count;
+            var line = "Pack watch: no spot covers all " + pending.ToString(CultureInfo.InvariantCulture) + ", area covers " +
+                       chosen.Count.ToString(CultureInfo.InvariantCulture) + ", left out: " + left;
+            if (!inArea)
+            {
+                var move = PackGeometry.MoveInto(areaXz, spot, radius, playerXz);
+                var to = spot - playerXz;
+                line += ". Move " + MathF.Max(1f, MathF.Ceiling(move)).ToString("0", CultureInfo.InvariantCulture) + " y " +
+                        Compass.Direction(to.X, to.Y);
+            }
+
+            return new PackStatus(line, missedText, pending, true, spot, false, false, inArea, true);
         }
 
+        areaXz.AddRange(scratch);
         if (inRange < pending)
         {
             var move = PackGeometry.MoveInto(scratch, centre, radius, playerXz);
@@ -383,8 +499,42 @@ internal sealed class PackWatch
 
         var wait = nextSeconds < 0 ? "next unknown" : nextSeconds == 0 ? "next due now" : "next ~" + nextSeconds.ToString(CultureInfo.InvariantCulture) + " s";
         return new PackStatus("In range of all " + pending.ToString(CultureInfo.InvariantCulture) + ", waiting: " + wait, missedText,
-            pending, true, centre, true, false);
+            pending, true, centre, true, false, true);
     }
+
+    /// <summary>"dropped: Ashkin (day), Val Keeper x2 (5 min)": each dropped name and reason once.</summary>
+    private string DroppedText()
+    {
+        var text = new StringBuilder("dropped: ");
+        var first = true;
+        for (var i = 0; i < points.Count; i++)
+        {
+            var p = points[i];
+            if (!IsDropped(p))
+                continue;
+            var seenBefore = false;
+            for (var j = 0; j < i && !seenBefore; j++)
+                seenBefore = SameDrop(points[j], p);
+            if (seenBefore)
+                continue;
+            var count = 0;
+            for (var j = i; j < points.Count; j++)
+                if (SameDrop(points[j], p))
+                    count++;
+            text.Append(first ? "" : ", ").Append(NameOf(p));
+            if (count > 1)
+                text.Append(" x").Append(count.ToString(CultureInfo.InvariantCulture));
+            text.Append(" (").Append(p.DropReason.Length > 0 ? p.DropReason : "condition over").Append(')');
+            first = false;
+        }
+
+        return text.ToString();
+    }
+
+    private static bool IsDropped(PackPoint p) => p.Outcome is PackOutcome.ConditionEnded or PackOutcome.TimedOut;
+
+    private static bool SameDrop(PackPoint a, PackPoint b) =>
+        IsDropped(a) && IsDropped(b) && a.DropReason == b.DropReason && NameOf(a) == NameOf(b);
 
     /// <summary>3D distance when the point's height is trusted, else horizontal.</summary>
     public static float DistanceTo(PackPoint p, Vector3 player) =>
@@ -392,8 +542,14 @@ internal sealed class PackWatch
 
     private static string NameOf(PackPoint p) => p.Name.Length > 0 ? p.Name : "Enemy " + p.BnpcId.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>The waiting points as x/z pairs (for drawing; refilled by <see cref="Status"/>).</summary>
+    /// <summary>The waiting points as x/z pairs (refilled by <see cref="Status"/>).</summary>
     public IReadOnlyList<Vector2> PendingXz => scratch;
+
+    /// <summary>
+    /// The points whose circles make the one drawn area (refilled by <see cref="Status"/>): all waiting points, or when
+    /// no spot covers all of them the largest set one spot can cover.
+    /// </summary>
+    public IReadOnlyList<Vector2> AreaXz => areaXz;
 }
 
 /// <summary>Where the off-screen pointer arrow goes: on a rectangle inset from the screen edge, along a direction.</summary>
