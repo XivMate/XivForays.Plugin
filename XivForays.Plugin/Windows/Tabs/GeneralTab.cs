@@ -95,8 +95,16 @@ internal class GeneralTab(
         ImGui.Indent();
         changed |= Box("1. Nearby needed list##OverlayNearbyList", configuration.OverlayNearbyList, v => configuration.OverlayNearbyList = v,
             "A small window with the nearest spawn points that still need a confirmation: distance, compass direction; click a row to pin it as the watch point.");
+        if (configuration.OverlayNearbyList)
+        {
+            ImGui.Indent();
+            changed |= Box("Point to the picked row##OverlayPointer", configuration.OverlayPointer, v => configuration.OverlayPointer = v,
+                "For the row you clicked: a marker over the spot, a guide line on the ground from you to it, and an arrow with the distance at the screen edge when it is off screen.");
+            ImGui.Unindent();
+        }
+
         changed |= Box("2. Respawn countdown##OverlayRespawn", configuration.OverlayRespawn, v => configuration.OverlayRespawn = v,
-            "Approximate countdown (~50 s) on the spots of enemies that just died, your own kills first. At zero: Awaiting spawn.");
+            "Approximate countdown on the spots of enemies that just died, your own kills first, from the measured respawn of that enemy (~50 s by default). Night and weather enemies say when they can be back instead. At zero: Awaiting spawn.");
         changed |= Box("3. Range and readiness##OverlayRange", configuration.OverlayRange, v => configuration.OverlayRange = v,
             "For the selected or pinned point: distance against the 80 y watch range, the 5 s history meter, Move closer, and continuity lost beyond 100 y.");
         changed |= Box("4. Confirmed locally feedback##OverlayLocalConfirm", configuration.OverlayLocalConfirm, v => configuration.OverlayLocalConfirm = v,
@@ -113,8 +121,23 @@ internal class GeneralTab(
 
         changed |= Box("6. Markers on empty needed points##OverlayEmptyPoints", configuration.OverlayEmptyPoints, v => configuration.OverlayEmptyPoints = v,
             "Markers where a needed spawn point is not currently occupied. Approximate (walk-past) points are hollow; points with an uncertain height stay in the list only.");
-        changed |= Box("7. Ground circles##OverlayRings", configuration.OverlayRings, v => configuration.OverlayRings = v,
+        changed |= Box("7. Pack watch##OverlayPackWatch", configuration.OverlayPackWatch, v => configuration.OverlayPackWatch = v,
+            "After you (or your party) kill a pack: a ring at each spawn point waiting for its respawn, the best spot to stand and the area from where all of them are within the radius below, and one status line until all of them are back.");
+        ImGui.Indent();
+        if (configuration.OverlayPackWatch)
+        {
+            ImGui.SetNextItemWidth(200);
+            var radius = configuration.OverlayPackRadius;
+            if (ImGui.SliderFloat("Keep within (y)##OverlayPackRadius", ref radius, PackWatch.MinRadius, PackWatch.MaxRadius, "%.0f"))
+            {
+                configuration.OverlayPackRadius = radius;
+                changed = true;
+            }
+        }
+
+        changed |= Box("Single-point 80 y / 70 y rings##OverlayRings", configuration.OverlayRings, v => configuration.OverlayRings = v,
             "80 y watch and 70 y photo circles around the selected point only (approximate guide; the numbers in the window decide).");
+        ImGui.Unindent();
         changed |= Box("8. Spawn conditions##OverlayConditions", configuration.OverlayConditions, v => configuration.OverlayConditions = v,
             "Shows the condition text (weather, night, FATE) and greys a point when the condition is known to be unmet right now.");
 

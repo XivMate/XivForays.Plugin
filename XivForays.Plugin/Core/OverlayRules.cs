@@ -456,3 +456,39 @@ internal static class OverlayZones
     public static bool IsSupportedFieldMap(uint territory, uint mapId) =>
         CoverageFeed.ZoneName(territory) != null && mapId != 0 && !IsBaldesionArsenal(territory, mapId);
 }
+
+/// <summary>
+/// One label per spawn: the spawn points already labelled this frame (by row key and by x/z position). Right after
+/// a respawn both the enemy marker and the "Confirmed locally" flash used to be drawn over the same spawn; the first
+/// one drawn claims the spawn and the second is skipped. Fixed capacity, no allocation per frame.
+/// </summary>
+internal sealed class SpawnLabels
+{
+    private const int Capacity = 128;
+    private readonly string?[] keys = new string?[Capacity];
+    private readonly Vector2[] spots = new Vector2[Capacity];
+    private int count;
+
+    public void Clear() => count = 0;
+
+    // A label without a coverage row (unmatched enemy, provisional "local:" point) is deduplicated by position.
+    private static bool Loose(string? key) => key == null || key.StartsWith("local:", StringComparison.Ordinal);
+
+    /// <summary>True when this spawn has no label yet (and claims it); false when one is already drawn there.</summary>
+    public bool TryClaim(string? key, Vector3 anchor)
+    {
+        var spot = new Vector2(anchor.X, anchor.Z);
+        for (var i = 0; i < count; i++)
+            if (key != null && keys[i] == key ||
+                (Loose(key) || Loose(keys[i])) && Vector2.Distance(spots[i], spot) <= OverlayRates.MatchYalms)
+                return false;
+        if (count < Capacity)
+        {
+            keys[count] = key;
+            spots[count] = spot;
+            count++;
+        }
+
+        return true;
+    }
+}

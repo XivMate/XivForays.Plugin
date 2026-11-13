@@ -15,6 +15,9 @@ public partial class Configuration
     /// <summary>1. Nearby needed list window.</summary>
     public bool OverlayNearbyList { get; set; } = false;
 
+    /// <summary>1. The game points to the row picked in the list: a marker, a ground guide and an edge arrow.</summary>
+    public bool OverlayPointer { get; set; } = true;
+
     /// <summary>2. Respawn countdown on spots of enemies that just died.</summary>
     public bool OverlayRespawn { get; set; } = false;
 
@@ -33,7 +36,13 @@ public partial class Configuration
     /// <summary>6. Markers on empty spawn points still needed.</summary>
     public bool OverlayEmptyPoints { get; set; } = false;
 
-    /// <summary>7. Ground circles (80 y watch, 70 y photo) around the selected point.</summary>
+    /// <summary>7. Pack watch: the spawn points of a killed pack, the spot that keeps all of them in range.</summary>
+    public bool OverlayPackWatch { get; set; } = false;
+
+    /// <summary>7. Pack watch keep-within radius (yalms, 50 to 80, default 60: a margin under the 80 y rule).</summary>
+    public float OverlayPackRadius { get; set; } = PackWatch.DefaultRadius;
+
+    /// <summary>Single-point ground circles (80 y watch, 70 y photo) around the selected point, under Pack watch.</summary>
     public bool OverlayRings { get; set; } = false;
 
     /// <summary>8. Spawn condition text, greyed when known unavailable.</summary>
@@ -55,12 +64,15 @@ public partial class Configuration
     internal OverlayFeatures OverlayFeatures => new(
         OverlayEnabled,
         OverlayEnabled && OverlayNearbyList,
+        OverlayEnabled && OverlayNearbyList && OverlayPointer,
         OverlayEnabled && OverlayRespawn,
         OverlayEnabled && OverlayRange,
         OverlayEnabled && OverlayLocalConfirm,
         OverlayEnabled && OverlayEnemyMarkers,
         OverlayEnabled && OverlayEnemyMarkers && OverlayShowConfirmed,
         OverlayEnabled && OverlayEmptyPoints,
+        OverlayEnabled && OverlayPackWatch,
+        Math.Clamp(float.IsFinite(OverlayPackRadius) ? OverlayPackRadius : PackWatch.DefaultRadius, PackWatch.MinRadius, PackWatch.MaxRadius),
         OverlayEnabled && OverlayRings,
         OverlayEnabled && OverlayConditions,
         Math.Clamp(float.IsFinite(OverlayDisplayYalms) ? OverlayDisplayYalms : OverlayRates.DefaultDisplayYalms, 20f, OverlayRates.MaxDisplayYalms),
@@ -76,12 +88,15 @@ public partial class Configuration
 internal readonly record struct OverlayFeatures(
     bool Enabled,
     bool NearbyList,
+    bool Pointer,
     bool Respawn,
     bool Range,
     bool LocalConfirm,
     bool EnemyMarkers,
     bool ShowConfirmed,
     bool EmptyPoints,
+    bool PackWatch,
+    float PackRadius,
     bool Rings,
     bool Conditions,
     float DisplayYalms,
@@ -96,8 +111,8 @@ internal readonly record struct OverlayFeatures(
     public bool NeedsDownload => Enabled;
 
     /// <summary>The enemy scan feeds the overlay only when a feature uses live enemies.</summary>
-    public bool NeedsScan => Enabled && (NearbyList || Respawn || Range || LocalConfirm || EnemyMarkers || EmptyPoints || Rings);
+    public bool NeedsScan => Enabled && (NearbyList || Respawn || Range || LocalConfirm || EnemyMarkers || EmptyPoints || PackWatch || Rings);
 
     /// <summary>Something is drawn into the game view.</summary>
-    public bool DrawsWorld => Enabled && (Respawn || LocalConfirm || EnemyMarkers || EmptyPoints || Rings);
+    public bool DrawsWorld => Enabled && (Pointer || Respawn || LocalConfirm || EnemyMarkers || EmptyPoints || PackWatch || Rings);
 }

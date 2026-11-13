@@ -85,6 +85,15 @@ internal sealed class CollectorSession
 
     public WatchMeter Meter { get; } = new();
 
+    /// <summary>Pack watch: own and party kills of matched spawn points waiting for their respawn.</summary>
+    public PackWatch Pack { get; } = new();
+
+    /// <summary>Pack watch on: kills are added to <see cref="Pack"/>.</summary>
+    public bool PackEnabled { get; set; }
+
+    /// <summary>The keep-within radius of the pack watch (yalms).</summary>
+    public float PackRadius { get; set; } = PackWatch.DefaultRadius;
+
     /// <summary>Feature 4 on: local confirmations override the downloaded status. Off: the public status only.</summary>
     public bool LocalOverrides { get; set; } = true;
     public Vector3 Player { get; private set; }
@@ -112,6 +121,7 @@ internal sealed class CollectorSession
         deaths.Clear();
         confirmations.Clear();
         pendingDefeats.Clear();
+        Pack.Clear();
         LastConfirmation = null;
         Meter.Clear();
         HasPlayer = false;
@@ -176,8 +186,13 @@ internal sealed class CollectorSession
         if (enemy.MatchedVersion != snapshotVersion)
             Bind(enemy);
         // It is up again: any countdown of the same point ends.
-        if (deaths.Count > 0 && enemy.Match.Point is { } point)
-            deaths.RemoveAll(d => d.PointKey == point.Key && d.TrackId != trackId);
+        if (enemy.Match.Point is { } point)
+        {
+            if (deaths.Count > 0)
+                deaths.RemoveAll(d => d.PointKey == point.Key && d.TrackId != trackId);
+            if (Pack.Points.Count > 0)
+                Pack.Respawned(point.Key, NowMs, HasPlayer ? Vector3.Distance(Player, enemy.Anchor) : float.MaxValue, PackRadius);
+        }
     }
 
     /// <summary>An observed live to HP 0 transition. The timer anchors at the spawn anchor, not the corpse.</summary>
@@ -193,7 +208,7 @@ internal sealed class CollectorSession
         deaths.RemoveAll(d => d.TrackId == trackId);
         if (deaths.Count >= MaxDeaths)
             deaths.RemoveAt(0);
-        deaths.Add(new OverlayDeath
+        var death = new OverlayDeath
         {
             TrackId = trackId,
             BnpcId = bnpcId,
@@ -205,6 +220,27 @@ internal sealed class CollectorSession
             FateBound = fateId != 0,
             MaxPlayerDistance = HasPlayer ? Vector3.Distance(anchor, Player) : 0,
             DefeatBy = pendingDefeats.Remove(trackId, out var by) ? by : (byte)0
+        };
+        deaths.Add(death);
+        AddToPack(death);
+    }
+
+    /// <summary>An own or party kill of a matched, non-FATE spawn point joins the pack watch.</summary>
+    private void AddToPack(OverlayDeath death)
+    {
+        if (!PackEnabled || death.DefeatBy == 0 || death.FateBound || death.PointKey == null || snapshot == null ||
+            !snapshot.ByKey.TryGetValue(death.PointKey, out var point))
+            return;
+        Pack.Killed(new PackPoint
+        {
+            Key = point.Key,
+            Name = point.Name,
+            BnpcId = point.BnpcId,
+            Anchor = point.HeightKnown ? new Vector3(point.X, point.Y, point.Z) : death.Anchor with { X = point.X, Z = point.Z },
+            HeightKnown = point.HeightKnown,
+            Condition = point.Condition,
+            AlreadyDone = StatusOf(point, out _) == CoverageStatus.Confirmed,
+            DiedAtMs = death.DiedAtMs
         });
     }
 
@@ -214,7 +250,10 @@ internal sealed class CollectorSession
         foreach (var death in deaths)
             if (death.TrackId == trackId)
             {
+                var first = death.DefeatBy == 0;
                 death.DefeatBy = defeatBy;
+                if (first)
+                    AddToPack(death);
                 return;
             }
 
@@ -244,7 +283,12 @@ internal sealed class CollectorSession
     public OverlayConfirmation? Evidence(Observation record)
     {
         if (record.Kind == ObservationKind.EnemyAppeared && record.Respawn is { } respawn)
+        {
+            foreach (var d in deaths)
+                if (d.TrackId == respawn.PreviousTrackId && d.PointKey != null && Pack.Points.Count > 0)
+                    Pack.Respawned(d.PointKey, NowMs, HasPlayer ? Vector3.Distance(Player, d.Anchor) : float.MaxValue, PackRadius);
             deaths.RemoveAll(d => d.TrackId == respawn.PreviousTrackId);
+        }
         var evidence = LocalConfirmation.Evaluate(record);
         if (evidence == LocalEvidence.None || record.EnemyTrackId is not { } trackId)
             return null;

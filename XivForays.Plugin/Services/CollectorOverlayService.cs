@@ -28,6 +28,11 @@ internal sealed class CollectorOverlayService : IDisposable
     private const int MaxEmpty = 32;
     private const int MaxDeathRows = 5;
     private const int RingSegments = 48;
+    private const int AreaSegments = 64;
+    private const int GuideSteps = 24;
+    private const int SmallRingSegments = 16;
+    private static readonly Vector4 Amber = new(1f, 0.82f, 0.4f, 1f);
+    private static readonly Vector4 Good = new(0.45f, 0.9f, 0.6f, 1f);
 
     private readonly Plugin plugin;
     private readonly IClientState clientState;
@@ -54,6 +59,19 @@ internal sealed class CollectorOverlayService : IDisposable
     private readonly DeathRow[] deathRows = new DeathRow[MaxDeathRows];
     private readonly Vector2[] ring = new Vector2[RingSegments + 1];
     private readonly bool[] ringOk = new bool[RingSegments + 1];
+    private readonly Vector2[] area = new Vector2[AreaSegments];
+    private readonly Vector2[] areaScreen = new Vector2[AreaSegments];
+    private readonly bool[] areaOk = new bool[AreaSegments];
+    private readonly Vector3[] packPoints = new Vector3[PackWatch.MaxPoints];
+    private readonly SpawnLabels labels = new();
+    private int packCount;
+    private PackStatus pack;
+    private float packY;
+    private long unixNow;
+    private long tickNow;
+    private string? flashKey;
+    private string pointerText = "";
+    private string pointerEdgeText = "";
 
     private HttpCoverageFetcher? fetcher;
     private CoverageFeed? feed;
@@ -126,6 +144,10 @@ internal sealed class CollectorOverlayService : IDisposable
         }
 
         session.LocalOverrides = features.LocalConfirm;
+        session.PackEnabled = features.PackWatch;
+        session.PackRadius = features.PackRadius;
+        if (!features.PackWatch)
+            session.Pack.Clear();
         enemies.Overlay = features.NeedsScan ? session : null;
     }
 
@@ -139,7 +161,8 @@ internal sealed class CollectorOverlayService : IDisposable
         session.Clear();
         session.SetSnapshot(null);
         pinnedKey = null;
-        rowCount = emptyCount = deathRowCount = 0;
+        rowCount = emptyCount = deathRowCount = packCount = 0;
+        pack = default;
         selected = default;
     }
 
@@ -161,6 +184,8 @@ internal sealed class CollectorOverlayService : IDisposable
     {
         if (feed == null)
             return;
+        tickNow = now;
+        unixNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         territory = clientState.IsLoggedIn ? clientState.TerritoryType : 0u;
         support = Support(territory, clientState.MapId);
         // A new visit (zone change, new instance) or an unsupported map: no state is carried over.
@@ -194,7 +219,8 @@ internal sealed class CollectorOverlayService : IDisposable
         feedLine = support != ZoneSupport.Supported ? "" : FeedText(feed, now);
         if (support != ZoneSupport.Supported || !hasPlayer)
         {
-            rowCount = emptyCount = deathRowCount = 0;
+            rowCount = emptyCount = deathRowCount = packCount = 0;
+            pack = default;
             selected = default;
             return;
         }
@@ -204,8 +230,66 @@ internal sealed class CollectorOverlayService : IDisposable
         BuildDeaths(now);
         BuildNearest();
         BuildSelected(now);
+        BuildPointerText();
         BuildConfirmations(now);
+        BuildPack(now);
     }
+
+    private void BuildPointerText()
+    {
+        if (!selected.Valid)
+        {
+            pointerText = pointerEdgeText = "";
+            return;
+        }
+
+        var dx = selected.Anchor.X - player.X;
+        var dz = selected.Anchor.Z - player.Z;
+        var distance = MathF.Sqrt(dx * dx + dz * dz).ToString("0", CultureInfo.InvariantCulture);
+        pointerText = selected.Name + "  " + distance + " y";
+        pointerEdgeText = pointerText + " " + Compass.Direction(dx, dz);
+    }
+
+    /// <summary>A scan time (Environment.TickCount64) as wall clock ms, for the weather forecast.</summary>
+    private long Unix(long tickMs) => unixNow - (tickNow - tickMs);
+
+    private void BuildPack(long now)
+    {
+        packCount = 0;
+        pack = default;
+        if (!features.PackWatch)
+            return;
+        var watch = session.Pack;
+        watch.Expire(now, p => RespawnTimer.HoldsNow(territory, p.Condition, unixNow));
+        var next = -1;
+        foreach (var p in watch.Points)
+        {
+            if (p.Outcome != PackOutcome.Pending)
+                continue;
+            var estimate = RespawnTable.For(p.BnpcId, p.Condition, territory);
+            if (!estimate.HasTimer)
+                continue;
+            var left = RespawnText.Remaining(p.DiedAtMs, now, estimate.Seconds);
+            next = next < 0 ? left : Math.Min(next, left);
+        }
+
+        pack = watch.Status(player, features.PackRadius, now, IsConfirmedNow, next);
+        var sumY = 0f;
+        foreach (var p in watch.Points)
+            if (p.Outcome == PackOutcome.Pending && packCount < packPoints.Length)
+            {
+                packPoints[packCount++] = p.Anchor;
+                sumY += p.Anchor.Y;
+            }
+
+        packY = packCount > 0 ? sumY / packCount : player.Y;
+        if (pack.HasSpot)
+            PackGeometry.Outline(watch.PendingXz, pack.Spot, features.PackRadius, area);
+    }
+
+    private bool IsConfirmedNow(PackPoint p) =>
+        session.Confirmations.ContainsKey(p.Key) ||
+        session.Snapshot?.ByKey.TryGetValue(p.Key, out var row) == true && session.StatusOf(row, out _) == CoverageStatus.Confirmed;
 
     private ZoneSupport Support(uint zone, uint mapId)
     {
@@ -305,7 +389,7 @@ internal sealed class CollectorOverlayService : IDisposable
             if (features.EmptyPoints && emptyCount < MaxEmpty && d2 <= display2 && point.HeightKnown && !session.IsOccupied(point))
             {
                 var greyed = ConditionOf(point) == ConditionState.Unavailable;
-                empty[emptyCount++] = new EmptyMarker(new Vector3(point.X, point.Y, point.Z), status,
+                empty[emptyCount++] = new EmptyMarker(point.Key, new Vector3(point.X, point.Y, point.Z), status,
                     point.Status == CoverageStatus.WalkPast, greyed, point.Key == pinnedKey);
             }
         }
@@ -343,6 +427,7 @@ internal sealed class CollectorOverlayService : IDisposable
         var condition = ConditionOf(point);
         row.Key = point.Key;
         row.Name = NameOf(point.Name, point.BnpcId);
+        row.PinnedName = "> " + row.Name;
         row.Status = (local != null ? "Confirmed locally" : CoverageStatusMap.Label(status)) +
                      (point.Qualifier != CoverageQualifier.None ? " (" + CoverageStatusMap.QualifierText(point.Qualifier) + ")" : "") +
                      (point.HeightKnown ? "" : ", height uncertain");
@@ -369,7 +454,20 @@ internal sealed class CollectorOverlayService : IDisposable
             row.Anchor = death.Anchor;
             row.Name = NameOf(point?.Name ?? "", death.BnpcId);
             row.Who = death.DefeatBy switch { 1 => "Your kill", 2 => "Party kill", _ => "Observed death" };
-            row.Timer = death.FateBound ? "FATE enemy: no timer" : RespawnText.Text(RespawnText.Remaining(death.DiedAtMs, now));
+            if (death.FateBound)
+            {
+                row.Timer = "FATE enemy: no timer";
+                row.Basis = "";
+                row.BasisText = "";
+            }
+            else
+            {
+                var estimate = RespawnTable.For(point?.BnpcId ?? death.BnpcId, point?.Condition ?? "", territory);
+                row.Timer = RespawnTimer.Text(territory, point?.Condition ?? "", estimate, Unix(death.DiedAtMs), unixNow, out var remaining);
+                row.Basis = RespawnTimer.Basis(estimate);
+                row.BasisText = row.Basis.Length == 0 || remaining < 0 ? "" : "(" + row.Basis + ")";
+            }
+
             row.Lost = WatchRules.ContinuityLost(death.MaxPlayerDistance);
             row.Approximate = death.AnchorApproximate;
             row.FateBound = death.FateBound;
@@ -430,6 +528,7 @@ internal sealed class CollectorOverlayService : IDisposable
         if (session.LastConfirmation is { } last && now - last.AtMs <= OverlayRates.ConfirmFlashMs)
         {
             flashAnchor = last.Anchor;
+            flashKey = last.Key;
             flashUntilMs = last.AtMs + OverlayRates.ConfirmFlashMs;
             flashLabel = last.NoLayout ? "Spawn watched locally; server match uncertain" :
                 last.Provisional ? "Confirmed locally (new point)" : "Confirmed locally";
@@ -458,20 +557,22 @@ internal sealed class CollectorOverlayService : IDisposable
 
     private void DrawWindow()
     {
-        var listOrRange = features.NearbyList || features.Range || features.Respawn || features.LocalConfirm;
+        var listOrRange = features.NearbyList || features.Range || features.Respawn || features.LocalConfirm || features.PackWatch;
         if (!listOrRange && statusLine.Length == 0)
             return;
-        ImGui.SetNextWindowSize(new Vector2(380, 300), ImGuiCond.FirstUseEver);
+        // A sensible first position and size; afterwards ImGui keeps where the window was put.
+        ImGui.SetNextWindowPos(new Vector2(40, 260), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(480, 340), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Vector2(360, 120), new Vector2(1000, 1000));
         if (!ImGui.Begin("Collector overlay##XivForaysCollector", ImGuiWindowFlags.NoFocusOnAppearing))
         {
             ImGui.End();
             return;
         }
 
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(6, 2));
         if (statusLine.Length > 0)
             ImGui.TextWrapped(statusLine);
-        if (feedLine.Length > 0)
-            ImGui.TextDisabled(feedLine);
         if (ImGui.SmallButton("Hide overlay"))
         {
             plugin.Configuration.OverlayHidden = true;
@@ -479,66 +580,132 @@ internal sealed class CollectorOverlayService : IDisposable
             ApplyConfig(plugin.Configuration);
         }
 
-        if (support == ZoneSupport.Supported)
+        if (feedLine.Length > 0)
         {
-            if (features.LocalConfirm)
-            {
-                if (Environment.TickCount64 < flashUntilMs)
-                    ImGui.TextColored(Rgba(CoverageStatusMap.Colour(CoverageStatus.Confirmed)), flashLabel);
-                if (confirmLine.Length > 0)
-                    ImGui.TextDisabled(confirmLine);
-            }
-
-            if (features.Range && selected.Valid)
-                DrawSelected();
-            if (features.Respawn && deathRowCount > 0)
-                DrawDeaths();
-            if (features.NearbyList)
-                DrawList();
+            ImGui.SameLine();
+            ImGui.TextDisabled(feedLine);
         }
 
+        if (support == ZoneSupport.Supported)
+        {
+            if (features.PackWatch)
+                DrawPackLines();
+            if (features.LocalConfirm)
+            {
+                // Always two lines, so nothing below moves when a confirmation comes and goes.
+                if (Environment.TickCount64 < flashUntilMs)
+                    ImGui.TextColored(Rgba(CoverageStatusMap.Colour(CoverageStatus.Confirmed)), flashLabel);
+                else
+                    ImGui.TextDisabled(" ");
+                ImGui.TextDisabled(confirmLine.Length > 0 ? confirmLine : "No local confirmation pending.");
+            }
+
+            if (features.Range)
+                DrawSelected();
+            if (features.NearbyList)
+                DrawList();
+            if (features.Respawn)
+                DrawDeaths();
+        }
+
+        ImGui.PopStyleVar();
         ImGui.End();
+    }
+
+    private void DrawPackLines()
+    {
+        ImGui.Separator();
+        if (pack.Line.Length == 0)
+        {
+            ImGui.TextDisabled("Pack watch: kill a pack, then wait where all its spawn points are in range.");
+            ImGui.TextDisabled(" ");
+            return;
+        }
+
+        ImGui.TextColored(pack.Done ? Good : pack.AllInRange ? new Vector4(1f, 1f, 1f, 1f) : Amber, pack.Line);
+        if (pack.Detail.Length > 0)
+            ImGui.TextColored(Amber, pack.Detail);
+        else
+            ImGui.TextDisabled(" ");
     }
 
     private void DrawSelected()
     {
+        // A fixed block of four lines: the list below never jumps when the selection changes.
         ImGui.Separator();
+        if (!selected.Valid)
+        {
+            ImGui.TextDisabled("No point selected.");
+            ImGui.TextDisabled(" ");
+            ImGui.TextDisabled(" ");
+            ImGui.TextDisabled(" ");
+            return;
+        }
+
         ImGui.TextColored(Rgba(selected.Colour), selected.Status);
         ImGui.SameLine();
         ImGui.TextUnformatted(selected.Name);
+        if (pinnedKey != null)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Unpin##XivForaysUnpin"))
+                pinnedKey = null;
+        }
+
         ImGui.TextUnformatted(selected.RangeText);
-        ImGui.ProgressBar(selected.Meter, new Vector2(-1, 0), "5 s nearby history");
+        ImGui.SameLine(220);
+        ImGui.ProgressBar(selected.Meter, new Vector2(-1, ImGui.GetTextLineHeight()), "5 s history");
         if (selected.MoveCloser)
-            ImGui.TextColored(new Vector4(1f, 0.82f, 0.4f, 1f), selected.Advice);
+            ImGui.TextColored(Amber, selected.Advice);
         else
             ImGui.TextUnformatted(selected.Advice);
-        if (selected.Respawn.Length > 0)
-            ImGui.TextUnformatted(selected.Respawn);
-        if (selected.Photo.Length > 0)
-            ImGui.TextDisabled(selected.Photo);
-        if (pinnedKey != null && ImGui.SmallButton("Unpin##XivForaysUnpin"))
-            pinnedKey = null;
+        var extra = selected.Respawn.Length > 0 && selected.Photo.Length > 0 ? selected.Respawn + " | " + selected.Photo :
+            selected.Respawn.Length > 0 ? selected.Respawn : selected.Photo;
+        ImGui.TextDisabled(extra.Length > 0 ? extra : " ");
     }
 
     private void DrawDeaths()
     {
         ImGui.Separator();
+        if (deathRowCount == 0)
+        {
+            ImGui.TextDisabled("No respawn pending.");
+            return;
+        }
+
+        if (!ImGui.BeginTable("##XivForaysDeaths", 4, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX))
+            return;
+        ImGui.TableSetupColumn("who", ImGuiTableColumnFlags.WidthFixed, 80);
+        ImGui.TableSetupColumn("name", ImGuiTableColumnFlags.WidthFixed, 140);
+        ImGui.TableSetupColumn("timer", ImGuiTableColumnFlags.WidthFixed, 250);
+        ImGui.TableSetupColumn("where", ImGuiTableColumnFlags.WidthFixed, 70);
         for (var i = 0; i < deathRowCount; i++)
         {
             var row = deathRows[i];
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
             ImGui.TextUnformatted(row.Who);
-            ImGui.SameLine();
+            ImGui.TableNextColumn();
             ImGui.TextUnformatted(row.Name);
-            ImGui.SameLine();
+            ImGui.TableNextColumn();
             ImGui.TextUnformatted(row.Timer);
-            ImGui.SameLine();
-            ImGui.TextDisabled(row.Distance);
+            if (row.BasisText.Length > 0)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled(row.BasisText);
+            }
+
             if (row.Lost)
             {
                 ImGui.SameLine();
-                ImGui.TextColored(new Vector4(1f, 0.82f, 0.4f, 1f), "continuity lost");
+                ImGui.TextColored(Amber, "lost");
             }
+
+            ImGui.TableNextColumn();
+            ImGui.TextDisabled(row.Distance);
         }
+
+        ImGui.EndTable();
     }
 
     private void DrawList()
@@ -550,22 +717,31 @@ internal sealed class CollectorOverlayService : IDisposable
             return;
         }
 
-        if (rowCount == 0)
-        {
-            ImGui.TextDisabled("Nothing needed nearby.");
+        var columns = features.Conditions ? 4 : 3;
+        if (!ImGui.BeginTable("##XivForaysNearby", columns, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX))
             return;
-        }
-
-        if (!ImGui.BeginTable("##XivForaysNearby", features.Conditions ? 4 : 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
-            return;
-        for (var i = 0; i < rowCount; i++)
+        ImGui.TableSetupColumn("name", ImGuiTableColumnFlags.WidthFixed, 150);
+        ImGui.TableSetupColumn("status", ImGuiTableColumnFlags.WidthFixed, 130);
+        ImGui.TableSetupColumn("where", ImGuiTableColumnFlags.WidthFixed, 70);
+        if (features.Conditions)
+            ImGui.TableSetupColumn("condition", ImGuiTableColumnFlags.WidthFixed, 200);
+        // Always the configured number of rows (blank when fewer points): no layout jump as points come and go.
+        for (var i = 0; i < features.ListRows; i++)
         {
-            var row = rows[i];
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
+            if (i >= rowCount)
+            {
+                ImGui.TextDisabled(i == 0 ? "Nothing needed nearby." : " ");
+                continue;
+            }
+
+            var row = rows[i];
             var pinned = row.Key == pinnedKey;
             ImGui.PushID(i);
-            if (ImGui.Selectable(row.Name, pinned, ImGuiSelectableFlags.SpanAllColumns))
+            if (pinned)
+                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, 0x90A0602Au);
+            if (ImGui.Selectable(pinned ? row.PinnedName : row.Name, pinned, ImGuiSelectableFlags.SpanAllColumns))
                 pinnedKey = pinned ? null : row.Key;
             ImGui.PopID();
             ImGui.TableNextColumn();
@@ -586,7 +762,7 @@ internal sealed class CollectorOverlayService : IDisposable
         }
 
         ImGui.EndTable();
-        ImGui.TextDisabled("Click a row to pin it as the watch point.");
+        ImGui.TextDisabled(pinnedKey == null ? "Click a row to pick it: the game points to it." : "Picked: the game points to it. Click it again to let go.");
     }
 
     private void DrawWorld(long now)
@@ -597,6 +773,10 @@ internal sealed class CollectorOverlayService : IDisposable
         var display2 = features.DisplayYalms * features.DisplayYalms;
         var budget = features.MaxMarkers;
         var liveBudget = budget / 2;
+        labels.Clear();
+
+        if (features.PackWatch)
+            DrawPack(list, alpha);
 
         if (features.Rings && selected.Valid && selected.HeightKnown)
         {
@@ -604,22 +784,11 @@ internal sealed class CollectorOverlayService : IDisposable
             DrawRing(list, selected.Anchor, OverlayRates.PhotoYalms, Colour(0xFF66D1FFu, alpha * 0.8f), "70 y photo");
         }
 
-        if (features.LocalConfirm && now < flashUntilMs && budget > 0)
-        {
-            if (Label(list, flashAnchor + new Vector3(0, 3f, 0), flashLabel, Colour(CoverageStatusMap.Colour(CoverageStatus.Confirmed), 1f), scale * 1.2f, Shape.Check, false))
-                budget--;
-        }
+        if (features.Pointer && pinnedKey != null && selected.Valid && selected.Key == pinnedKey)
+            DrawPointer(list, alpha, scale);
 
-        if (features.Respawn)
-            for (var i = 0; i < deathRowCount && budget > 0; i++)
-            {
-                var row = deathRows[i];
-                if (Vector3.DistanceSquared(row.Anchor, player) > display2)
-                    continue;
-                if (Label(list, row.Anchor + new Vector3(0, 2f, 0), row.Timer, Colour(row.DefeatColour, alpha), scale, Shape.Clock, false))
-                    budget--;
-            }
-
+        // One label per spawn: the enemy marker first, then the confirmation flash, timers and empty markers only
+        // where no label is drawn yet (the flash used to be drawn on top of the respawned enemy's own marker).
         if (features.EnemyMarkers && session.Snapshot != null)
         {
             foreach (var enemy in session.LiveValues)
@@ -637,6 +806,8 @@ internal sealed class CollectorOverlayService : IDisposable
                 var flash = local != null && now - local.AtMs <= OverlayRates.ConfirmFlashMs;
                 if (status == CoverageStatus.Confirmed && !features.ShowConfirmed && !flash)
                     continue;
+                if (!labels.TryClaim(enemy.Match.Point?.Key, enemy.Anchor))
+                    continue;
                 var text = enemy.Match.Point == null
                     ? enemy.Match.Kind == MatchKind.Ambiguous ? "Ambiguous" : "Unmatched"
                     : local != null ? "Confirmed locally" : CoverageStatusMap.Label(status);
@@ -649,15 +820,169 @@ internal sealed class CollectorOverlayService : IDisposable
             }
         }
 
+        if (features.LocalConfirm && now < flashUntilMs && budget > 0 && labels.TryClaim(flashKey, flashAnchor))
+        {
+            if (Label(list, flashAnchor + new Vector3(0, 3f, 0), flashLabel, Colour(CoverageStatusMap.Colour(CoverageStatus.Confirmed), 1f), scale * 1.2f, Shape.Check, false))
+                budget--;
+        }
+
+        if (features.Respawn)
+            for (var i = 0; i < deathRowCount && budget > 0; i++)
+            {
+                var row = deathRows[i];
+                if (Vector3.DistanceSquared(row.Anchor, player) > display2 || !labels.TryClaim(row.Key, row.Anchor))
+                    continue;
+                if (Label(list, row.Anchor + new Vector3(0, 2f, 0), row.Timer, Colour(row.DefeatColour, alpha), scale, Shape.Clock, false))
+                    budget--;
+            }
+
         if (features.EmptyPoints)
             for (var i = 0; i < emptyCount && budget > 0; i++)
             {
                 var marker = empty[i];
+                if (!labels.TryClaim(marker.Key, marker.Position))
+                    continue;
                 var colour = Colour(CoverageStatusMap.Colour(marker.Status), marker.Greyed ? alpha * 0.4f : alpha);
                 if (Label(list, marker.Position + new Vector3(0, 0.5f, 0), CoverageStatusMap.Label(marker.Status), colour,
                         marker.Pinned ? scale * 1.2f : scale, ShapeOf(marker.Status), marker.Hollow))
                     budget--;
             }
+    }
+
+    /// <summary>
+    /// The picked point: a beacon over the spot with its name and distance, a dashed guide on the ground from the
+    /// player to it, and when the spot is off screen an arrow at the screen edge with the distance.
+    /// </summary>
+    private void DrawPointer(ImDrawListPtr list, float alpha, float scale)
+    {
+        var colour = Colour(0xFF40E0FFu, MathF.Max(alpha, 0.8f));
+        var anchor = selected.Anchor;
+        var spot = selected.HeightKnown ? anchor : anchor with { Y = player.Y };
+        var distance = CoverageMatcher.DistanceXz(spot.X, spot.Z, player.X, player.Z);
+
+        // Guide: dashes from the player's feet to the spot, height interpolated, failed projections skipped.
+        var steps = Math.Clamp((int)(distance / 4f), 2, GuideSteps);
+        var havePrevious = gameGui.WorldToScreen(player, out var previous);
+        for (var i = 1; i <= steps; i++)
+        {
+            var world = Vector3.Lerp(player, spot, i / (float)steps);
+            var ok = gameGui.WorldToScreen(world, out var screen);
+            if (ok && havePrevious && i % 2 == 1)
+                list.AddLine(previous, screen, colour, 3f);
+            havePrevious = ok;
+            previous = screen;
+        }
+
+        // Beacon: a vertical line up from the spot, a ring at the foot and the label at the top.
+        var front = gameGui.WorldToScreen(spot, out var foot, out var inView);
+        if (front && inView)
+        {
+            var labelBase = foot;
+            if (gameGui.WorldToScreen(spot + new Vector3(0, 8f, 0), out var top))
+            {
+                list.AddLine(foot, top, Colour(0xFF000000u, alpha * 0.6f), 6f);
+                list.AddLine(foot, top, colour, 3f);
+                labelBase = top;
+            }
+
+            DrawWorldCircle(list, spot, 1.5f, colour, 2.5f);
+            var size = ImGui.CalcTextSize(pointerText);
+            var at = new Vector2(labelBase.X - size.X / 2, labelBase.Y - size.Y - 6 * scale);
+            list.AddRectFilled(at - new Vector2(4, 2), at + size + new Vector2(4, 2), Colour(0xFF000000u, 0.65f), 3f);
+            list.AddText(at, colour, pointerText);
+            return;
+        }
+
+        // Off screen: which way to turn. In front of the camera the projection itself gives the way; behind it, a
+        // short step from the player towards the spot does.
+        var viewport = ImGui.GetMainViewport();
+        var centre = viewport.Pos + viewport.Size / 2f;
+        Vector2 direction;
+        if (front)
+            direction = foot - centre;
+        else
+        {
+            var toward = new Vector3(spot.X - player.X, 0, spot.Z - player.Z);
+            toward = toward.LengthSquared() > 1e-4f ? Vector3.Normalize(toward) * 2f : new Vector3(0, 0, -2f);
+            direction = gameGui.WorldToScreen(player, out var a) && gameGui.WorldToScreen(player + toward, out var b) ? b - a : centre - foot;
+        }
+
+        var edge = viewport.Pos + ScreenEdge.Point(viewport.Size, direction, 70f);
+        var d = direction.LengthSquared() > 1e-6f ? Vector2.Normalize(direction) : new Vector2(0, 1);
+        var n = new Vector2(-d.Y, d.X);
+        var tip = edge + d * 22f;
+        list.AddTriangleFilled(tip + d * 2f, edge - n * 13f, edge + n * 13f, Colour(0xFF000000u, 0.6f));
+        list.AddTriangleFilled(tip, edge - n * 10f, edge + n * 10f, colour);
+        var labelSize = ImGui.CalcTextSize(pointerEdgeText);
+        var labelAt = edge - d * 34f - labelSize / 2f;
+        list.AddRectFilled(labelAt - new Vector2(4, 2), labelAt + labelSize + new Vector2(4, 2), Colour(0xFF000000u, 0.65f), 3f);
+        list.AddText(labelAt, colour, pointerEdgeText);
+    }
+
+    /// <summary>Pack watch drawing: a small ring at each waiting spawn point, the safe area outline, the best spot and the status text.</summary>
+    private void DrawPack(ImDrawListPtr list, float alpha)
+    {
+        if (pack.Line.Length == 0)
+            return;
+        var inside = pack.AllInRange;
+        var ringColour = Colour(0xFF66D1FFu, alpha);
+        for (var i = 0; i < packCount; i++)
+            DrawWorldCircle(list, packPoints[i], 2.5f, ringColour, 2.5f);
+
+        if (pack.HasSpot)
+        {
+            var areaColour = Colour(inside ? 0xFF7FE07Fu : 0xFF40C0FFu, alpha * 0.9f);
+            for (var i = 0; i < AreaSegments; i++)
+                areaOk[i] = gameGui.WorldToScreen(new Vector3(area[i].X, packY, area[i].Y), out areaScreen[i]);
+            for (var i = 0; i < AreaSegments; i++)
+            {
+                var j = (i + 1) % AreaSegments;
+                if (areaOk[i] && areaOk[j])
+                    list.AddLine(areaScreen[i], areaScreen[j], areaColour, 2.5f);
+            }
+
+            if (gameGui.WorldToScreen(new Vector3(pack.Spot.X, packY, pack.Spot.Y), out var at))
+            {
+                list.AddCircleFilled(at, 7f, Colour(0xFF000000u, 0.6f));
+                list.AddLine(at - new Vector2(7, 7), at + new Vector2(7, 7), areaColour, 3f);
+                list.AddLine(at - new Vector2(7, -7), at + new Vector2(7, -7), areaColour, 3f);
+                const string tag = "Best spot";
+                var tagSize = ImGui.CalcTextSize(tag);
+                var tagAt = new Vector2(at.X - tagSize.X / 2, at.Y + 10);
+                list.AddRectFilled(tagAt - new Vector2(3, 1), tagAt + tagSize + new Vector2(3, 1), Colour(0xFF000000u, 0.6f), 3f);
+                list.AddText(tagAt, areaColour, tag);
+            }
+        }
+
+        // The status line on screen, top centre.
+        var viewport = ImGui.GetMainViewport();
+        var colour = pack.Done ? 0xFF99E673u : inside ? 0xFFFFFFFFu : 0xFF66D1FFu;
+        var lineSize = ImGui.CalcTextSize(pack.Line);
+        var detailSize = pack.Detail.Length > 0 ? ImGui.CalcTextSize(pack.Detail) : Vector2.Zero;
+        var top = viewport.Pos.Y + viewport.Size.Y * 0.12f;
+        var width = MathF.Max(lineSize.X, detailSize.X);
+        var height = lineSize.Y + (detailSize.Y > 0 ? detailSize.Y + 2 : 0);
+        var boxAt = new Vector2(viewport.Pos.X + (viewport.Size.X - width) / 2, top);
+        list.AddRectFilled(boxAt - new Vector2(8, 4), boxAt + new Vector2(width, height) + new Vector2(8, 4), Colour(0xFF000000u, 0.65f), 4f);
+        list.AddText(new Vector2(viewport.Pos.X + (viewport.Size.X - lineSize.X) / 2, top), Colour(colour, 1f), pack.Line);
+        if (pack.Detail.Length > 0)
+            list.AddText(new Vector2(viewport.Pos.X + (viewport.Size.X - detailSize.X) / 2, top + lineSize.Y + 2), Colour(0xFF66D1FFu, 1f), pack.Detail);
+    }
+
+    /// <summary>A flat circle at the point's own height (16 segments, failed projections skipped).</summary>
+    private void DrawWorldCircle(ImDrawListPtr list, Vector3 centre, float radius, uint colour, float thickness)
+    {
+        var havePrevious = false;
+        Vector2 previous = default;
+        for (var i = 0; i <= SmallRingSegments; i++)
+        {
+            var angle = i * MathF.Tau / SmallRingSegments;
+            var ok = gameGui.WorldToScreen(new Vector3(centre.X + radius * MathF.Cos(angle), centre.Y, centre.Z + radius * MathF.Sin(angle)), out var screen);
+            if (ok && havePrevious)
+                list.AddLine(previous, screen, colour, thickness);
+            havePrevious = ok;
+            previous = screen;
+        }
     }
 
     private enum Shape : byte
@@ -770,6 +1095,7 @@ internal sealed class CollectorOverlayService : IDisposable
     {
         public string Key = "";
         public string Name = "";
+        public string PinnedName = "";
         public string Status = "";
         public string Distance = "";
         public string Condition = "";
@@ -785,6 +1111,8 @@ internal sealed class CollectorOverlayService : IDisposable
         public string Name = "";
         public string Who = "";
         public string Timer = "";
+        public string Basis = "";
+        public string BasisText = "";
         public string Distance = "";
         public bool Lost;
         public bool Approximate;
@@ -792,7 +1120,7 @@ internal sealed class CollectorOverlayService : IDisposable
         public uint DefeatColour => Who == "Your kill" ? 0xFFB0D64Du : 0xFFD0D0D0u;
     }
 
-    private readonly record struct EmptyMarker(Vector3 Position, CoverageStatus Status, bool Hollow, bool Greyed, bool Pinned);
+    private readonly record struct EmptyMarker(string Key, Vector3 Position, CoverageStatus Status, bool Hollow, bool Greyed, bool Pinned);
 
     private readonly record struct Target(bool Valid, string? Key, Vector3 Anchor, bool HeightKnown, string Name, string Status,
         uint Colour, string RangeText, float Meter, string Advice, string Respawn, string Photo, bool MoveCloser);
