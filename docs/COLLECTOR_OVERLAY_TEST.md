@@ -10,8 +10,9 @@ normal ~50 s respawn. Avoid FATEs for sections 2 to 4 until the end.
 
 What to do:
 
-1. Load the dev build (`XivForays.Plugin\bin\Release\XivForays.Plugin.dll` from the branch worktree) as a dev plugin.
-   Check `/xlplugins` shows version 0.0.0.16.
+1. Load the dev build (`XivForays.Plugin\bin\x64\Release\XivForays.Plugin.dll` after
+   `dotnet build XivForays.Plugin.sln -c Release -p:Platform=x64`) as a dev plugin. Check `/xlplugins` shows version
+   0.0.0.16.
 2. Make sure **Crowdsource data** and **Record in: Eureka** are ticked (live feedback needs the recording scan).
 3. Before ticking anything else, stand in Anemos for a minute. The first time, the folder
    `%AppData%\XIVLauncher\pluginConfigs\XivForays.Plugin\coverage-cache` must not exist yet: no download has
