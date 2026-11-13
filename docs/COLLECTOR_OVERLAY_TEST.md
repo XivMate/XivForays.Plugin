@@ -267,9 +267,12 @@ Fail if:
 How it works (approach): the points are drawn with ImGui over the game's own area map window, not added as game map
 markers. Game markers (the map agent's marker list) are a short fixed list that the game rebuilds itself, which does
 not fit 1,200 points per zone; drawing over the window keeps the plugin read-only (nothing in the game is
-changed). The map image node of the open map tells where the map texture is on screen, so markers follow zoom, pan,
-window moves and the UI scale; the map agent gives the open map's id, size factor and offsets (world x/z to texture
-pixel: `(world + offset) * sizeFactor / 100 + 1024` on the 2048 pixel texture). Markers are culled to the map view,
+changed). Every frame the map image node's on-screen rectangle (window position, window resize and UI scale), the
+map's zoom and pan are read fresh; the image node is only a window onto the 2048 pixel texture, so zoom and pan
+decide which part of the texture it shows. The map agent gives the open map's id, size factor and offsets (world x/z
+to texture pixel: `(world + offset) * sizeFactor / 100 + 1024`). The game's own player arrow is used as a check:
+of the possible ways the texture can sit in the window, the one that puts you on the arrow is used, and a small gap
+(up to 60 px) is shifted away. Everything is clipped to the map image. Markers are culled to the map view,
 the nearest to you are drawn first, at most **Max map markers** (400 by default, 50 to 1,500). The minimap is not
 covered yet: it draws from a rotating render texture whose scale needs its own check in game, so it comes later.
 
@@ -284,11 +287,16 @@ What you should see:
 - Small markers in the in-world colours and shapes: diamond To confirm, hollow circle Walk-past, circle with "?" Never
   seen, check mark Confirmed. With **Spawns now only** off, points whose condition is unmet now are drawn faded; with it
   on (the default) they are hidden.
-- The markers sit on the right spots and stay on them while you zoom, drag and move the window. Nothing is drawn
-  outside the map view.
-- The window line "Map: N markers in view (M match the filters), arrow check K px". K is how far the game's own player
-  arrow is from where the overlay puts you; a few pixels is fine. "Map: showing another map ..." when you look at a
-  different zone or a world map: then nothing is drawn.
+- A small magenta cross where the overlay's maths puts you. It sits on the game's own player arrow.
+- The markers stay glued to their spots while you: resize the map window (small and large), zoom in and out (buttons,
+  slider and mouse wheel), drag (pan) the map, and move the window. Nothing is drawn outside the map image, over the
+  map's buttons or over the game view.
+- The window line "Map: N markers in view (M match the filters), map check K px". K is how far the magenta cross is
+  from the game's player arrow; a few pixels is fine. "(aligned)" after it means a small gap was shifted away. "map
+  check: player arrow not in view" when you have panned away from yourself.
+- "Map: showing another map ..." when you look at a different zone, a world or region map, or a sub-map such as
+  "Eureka Pagos > The Barren Arena": then nothing is drawn. "Map: the map image is hidden." when the map is collapsed
+  or faded out.
 - Hover: a tooltip with the enemy name, "Lv N" once an enemy of that kind was seen this session, the status, "When:"
   and the condition (with the reason when unmet now), and for a pending respawn "Respawn ~32 s" (or "Back at night
   ...").
@@ -303,14 +311,16 @@ What you should see:
 
 Fail if:
 
-- Markers are offset from where the enemies stand (say so with the "arrow check" number and the zoom level), or drift
-  when you zoom or drag.
-- Markers are drawn outside the map view, over the map's buttons, or stay after the map closes.
+- The magenta cross is not on the player arrow, or markers are offset from where the enemies stand (say so with the
+  "map check" number and the zoom level), or drift when you resize, zoom, drag or move the window.
+- Markers are drawn outside the map image, over the map's buttons, or stay after the map closes.
+- Anything is drawn on a sub-map or another zone's map.
 - A filter hides a point it should keep (for example an "any time" point with Spawns now only).
 - The framerate drops noticeably with the map open.
 
-The first time the map opens after the plugin loads, `dalamud.log` gets one line starting "Collector overlay map view"
-with the map numbers. If the markers are offset, please send that line.
+Each time the map opens, `dalamud.log` gets one line starting "Collector overlay map view" with the map numbers, the
+model used, the map check and the gap of every model. If the markers are offset, please send those lines (one with a
+small window and one after resizing it larger).
 
 ## Options
 

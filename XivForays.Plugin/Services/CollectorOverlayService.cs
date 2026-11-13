@@ -1055,6 +1055,7 @@ internal sealed class CollectorOverlayService : IDisposable
         if (addonPtr.IsNull || !addonPtr.IsVisible)
         {
             mapWasOpen = false;
+            mapOpenFrames = 0;
             SetMapLine(-1, 0, 0);
             mapHoverKey = "";
             return;
@@ -1069,48 +1070,107 @@ internal sealed class CollectorOverlayService : IDisposable
             return;
         }
 
-        if (agent->SelectedMapId != clientState.MapId || agent->SelectedMapSizeFactor <= 0)
+        // Only the current zone's own map: a sub-map, region map or another zone's map draws nothing.
+        var mapId = agent->SelectedMapId;
+        if (mapId != clientState.MapId || (agent->CurrentMapId != 0 && mapId != agent->CurrentMapId) || agent->SelectedMapSizeFactor <= 0)
         {
             SetMapLine(-3, 0, 0);
             return;
         }
 
-        var origin = ImGui.GetMainViewport().Pos;
+        // Hidden, collapsed or faded out: nothing is drawn.
         var image = &component->BaseMapImage->AtkResNode;
-        var frame = component->OwnerNode != null ? &component->OwnerNode->AtkResNode : addon->RootNode;
-        if (frame == null)
+        var root = addon->AtkUnitBase.RootNode;
+        if (root == null || addon->AtkUnitBase.Alpha == 0 || !ShownOnScreen(image) || image->Width == 0 || image->Height == 0)
+        {
+            SetMapLine(-4, 0, 0);
             return;
-        var clipMin = origin + new Vector2(frame->ScreenX, frame->ScreenY);
-        var clipMax = clipMin + new Vector2(frame->Width * frame->Transform.M11, frame->Height * frame->Transform.M22);
-        var view = MapView.FromNode(origin.X + image->ScreenX, origin.Y + image->ScreenY, image->Transform.M11, image->Transform.M22,
-            image->Width, image->Height, agent->SelectedOffsetX, agent->SelectedOffsetY, agent->SelectedMapSizeFactor, clipMin, clipMax);
-        if (!view.Valid)
+        }
+
+        // Read fresh every frame: the image node's on-screen rectangle (window position, window scale and the UI scale
+        // are all in the node's screen values and transform), the map component's rectangle, zoom and pan.
+        var origin = ImGui.GetMainViewport().Pos;
+        var walked = AccumulatedScale(image);
+        var scale = new Vector2(Finite(image->Transform.M11, walked.X), Finite(image->Transform.M22, walked.Y));
+        var imageMin = origin + new Vector2(image->ScreenX, image->ScreenY);
+        var imageMax = imageMin + new Vector2(image->Width, image->Height) * scale;
+        var frameMin = Vector2.Zero;
+        var frameMax = Vector2.Zero;
+        var owner = component->OwnerNode != null ? &component->OwnerNode->AtkResNode : null;
+        if (owner != null && owner->Width > 0 && owner->Height > 0)
+        {
+            var ownerScale = AccumulatedScale(owner);
+            frameMin = origin + new Vector2(owner->ScreenX, owner->ScreenY);
+            frameMax = frameMin + new Vector2(owner->Width * Finite(owner->Transform.M11, ownerScale.X), owner->Height * Finite(owner->Transform.M22, ownerScale.Y));
+        }
+
+        var part = Vector4.Zero;
+        var parts = component->BaseMapImage->PartsList;
+        if (parts != null && parts->Parts != null && component->BaseMapImage->PartId < parts->PartCount)
+        {
+            var p = parts->Parts[component->BaseMapImage->PartId];
+            part = new Vector4(p.U, p.V, p.Width, p.Height);
+        }
+
+        var frame = new MapFrame(imageMin, imageMax, frameMin, frameMax, scale.X, addon->AreaMap.MapScale,
+            new Vector2(addon->AreaMap.MapOffsetX, addon->AreaMap.MapOffsetY), part);
+        float offsetX = agent->SelectedOffsetX, offsetY = agent->SelectedOffsetY, sizeFactor = agent->SelectedMapSizeFactor;
+        var playerXz = new Vector2(player.X, player.Z);
+        if (mapModelMapId != mapId)
+        {
+            mapModelMapId = mapId;
+            mapModel = -1;
+        }
+
+        // The game's own player arrow picks the model that fits and is the self-check ("map check K px").
+        var hasArrow = TryPlayerArrow(addon, origin, out var arrow);
+        Span<float> gaps = stackalloc float[MapModels.Count];
+        gaps.Fill(float.NaN);
+        var best = hasArrow ? MapCalibration.Best(frame, offsetX, offsetY, sizeFactor, playerXz, arrow, gaps) : -1;
+        var bestGap = best >= 0 ? gaps[best] : float.MaxValue;
+        var model = MapCalibration.Choose(best, bestGap, mapModel, frame);
+        if (best >= 0 && bestGap <= MapRates.PickLimitPixels)
+            mapModel = best;
+        var raw = MapView.From(frame, model, offsetX, offsetY, sizeFactor);
+        if (!raw.Valid)
         {
             SetMapLine(-2, 0, 0);
             return;
         }
 
-        // A check for the test: how far the game's own player arrow is from where this maths puts the player.
+        var playerOnMap = raw.ToScreen(player.X, player.Z);
         var gap = -1;
-        var cone = addon->AreaMap.PlayerCone;
-        if (cone != null && cone->AtkResNode.IsVisible())
+        if (hasArrow)
         {
-            var node = &cone->AtkResNode;
-            var pivot = origin + new Vector2(node->ScreenX + node->Transform.M11 * node->OriginX + node->Transform.M21 * node->OriginY,
-                node->ScreenY + node->Transform.M12 * node->OriginX + node->Transform.M22 * node->OriginY);
-            var distance = Vector2.Distance(pivot, view.ToScreen(player.X, player.Z));
+            var distance = Vector2.Distance(playerOnMap, arrow);
             gap = float.IsFinite(distance) ? (int)MathF.Min(distance, 9999f) : -1;
         }
 
-        if (!mapWasOpen)
+        var view = hasArrow ? raw.AlignedTo(playerXz, arrow, MapRates.AlignTolerancePixels, MapRates.AlignLimitPixels, out _) : raw;
+        var aligned = view.Shift != Vector2.Zero;
+
+        if (!mapWasOpen && (hasArrow || mapOpenFrames++ > 30))
         {
             mapWasOpen = true;
+            mapOpenFrames = 0;
+            var gapText = new System.Text.StringBuilder();
+            for (var i = 0; i < MapModels.Count; i++)
+                gapText.Append(i == 0 ? "" : ", ").Append(MapModels.Name(i)).Append(' ')
+                    .Append(float.IsFinite(gaps[i]) ? gaps[i].ToString("0", CultureInfo.InvariantCulture) : "-");
+            var arrowText = hasArrow
+                ? arrow.X.ToString("0", CultureInfo.InvariantCulture) + "/" + arrow.Y.ToString("0", CultureInfo.InvariantCulture)
+                : "not read";
             log.Information(string.Create(CultureInfo.InvariantCulture,
-                $"Collector overlay map view: size factor {agent->SelectedMapSizeFactor}, offset {agent->SelectedOffsetX}/{agent->SelectedOffsetY}, image {image->Width}x{image->Height} scale {image->Transform.M11:0.###}/{image->Transform.M22:0.###}, map scale {addon->AreaMap.MapScale:0.###}, frame {frame->Width}x{frame->Height}, arrow gap {gap} px"));
+                $"Collector overlay map view: map {mapId}, size factor {sizeFactor}, offset {offsetX}/{offsetY}, image {image->Width}x{image->Height} at {imageMin.X:0}/{imageMin.Y:0} to {imageMax.X:0}/{imageMax.Y:0}, transform {image->Transform.M11:0.###}/{image->Transform.M22:0.###}, walked scale {walked.X:0.###}/{walked.Y:0.###}, addon scale {addon->AtkUnitBase.Scale:0.###}, part {part.X}/{part.Y} {part.Z}x{part.W}, frame {frameMin.X:0}/{frameMin.Y:0} to {frameMax.X:0}/{frameMax.Y:0}, zoom {frame.Zoom:0.####}, pan {frame.Pan.X:0.#}/{frame.Pan.Y:0.#}, component zoom {component->MapScale:0.####} pan {component->MapOffsetX:0.#}/{component->MapOffsetY:0.#} size {component->MapWidth:0.#}x{component->MapHeight:0.#}, arrow {arrowText}, player {playerOnMap.X:0}/{playerOnMap.Y:0}, model {MapModels.Name(model)}, map check {gap} px{(aligned ? " (aligned)" : "")}; model gaps: {gapText}"));
         }
 
         var list = ImGui.GetBackgroundDrawList();
-        list.PushClipRect(clipMin, clipMax, false);
+        list.PushClipRect(view.ClipMin, view.ClipMax, true);
+
+        // Calibration cross where the maths (before any shift) puts the player: it should sit on the game's player arrow.
+        var cross = Colour(0xFFFF40FFu, 1f);
+        list.AddLine(playerOnMap - new Vector2(6f, 0f), playerOnMap + new Vector2(6f, 0f), cross, 1.5f);
+        list.AddLine(playerOnMap - new Vector2(0f, 6f), playerOnMap + new Vector2(0f, 6f), cross, 1.5f);
         var alpha = features.Opacity;
         var size = 4.5f * features.MarkerScale;
         var mouse = ImGui.GetMousePos();
@@ -1159,7 +1219,7 @@ internal sealed class CollectorOverlayService : IDisposable
         if (features.PackWatch && pack.Line.Length > 0)
             DrawPackOnMap(list, view, alpha);
         list.PopClipRect();
-        SetMapLine(drawn, mapPointCount, gap);
+        SetMapLine(drawn, mapPointCount, gap, aligned);
 
         if (hovered >= 0 && !ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow))
         {
@@ -1180,23 +1240,76 @@ internal sealed class CollectorOverlayService : IDisposable
     private int mapLineDrawn = int.MinValue;
     private int mapLineTotal = int.MinValue;
     private int mapLineGap = int.MinValue;
+    private bool mapLineAligned;
+    private int mapModel = -1;
+    private uint mapModelMapId;
+    private int mapOpenFrames;
 
     /// <summary>The map line of the window, rebuilt only when a number changes (drawn below 0: a state code).</summary>
-    private void SetMapLine(int drawn, int total, int gap)
+    private void SetMapLine(int drawn, int total, int gap, bool aligned = false)
     {
-        if (drawn == mapLineDrawn && total == mapLineTotal && gap == mapLineGap)
+        if (drawn == mapLineDrawn && total == mapLineTotal && gap == mapLineGap && aligned == mapLineAligned)
             return;
         mapLineDrawn = drawn;
         mapLineTotal = total;
         mapLineGap = gap;
+        mapLineAligned = aligned;
         mapLine = drawn switch
         {
             -1 => "",
             -2 => "Map: the map view could not be read.",
             -3 => "Map: showing another map; spawn points are drawn on your current zone's map only.",
+            -4 => "Map: the map image is hidden.",
             _ => "Map: " + drawn.ToString(CultureInfo.InvariantCulture) + " markers in view (" + total.ToString(CultureInfo.InvariantCulture) +
-                 " match the filters)" + (gap >= 0 ? ", arrow check " + gap.ToString(CultureInfo.InvariantCulture) + " px" : "")
+                 " match the filters)" + (gap >= 0
+                     ? ", map check " + gap.ToString(CultureInfo.InvariantCulture) + " px" + (aligned ? " (aligned)" : "")
+                     : ", map check: player arrow not in view")
         };
+    }
+
+    private static float Finite(float value, float fallback) => float.IsFinite(value) && value > 0f ? value : fallback;
+
+    /// <summary>The node's scale times every parent's scale (the root node carries the window's own scale).</summary>
+    private static unsafe Vector2 AccumulatedScale(AtkResNode* node)
+    {
+        var scale = Vector2.One;
+        for (var depth = 0; node != null && depth < 64; depth++, node = node->ParentNode)
+            scale *= new Vector2(node->ScaleX, node->ScaleY);
+        return scale;
+    }
+
+    /// <summary>The node and all its parents are visible.</summary>
+    private static unsafe bool ShownOnScreen(AtkResNode* node)
+    {
+        for (var depth = 0; node != null && depth < 64; depth++, node = node->ParentNode)
+            if (!node->IsVisible())
+                return false;
+        return true;
+    }
+
+    /// <summary>The screen point of the game's own player arrow: the pivot of the view cone, else the centre of the pin.</summary>
+    private static unsafe bool TryPlayerArrow(AddonAreaMap* addon, Vector2 origin, out Vector2 arrow)
+    {
+        arrow = default;
+        var cone = addon->AreaMap.PlayerCone;
+        if (cone != null && ShownOnScreen(&cone->AtkResNode))
+        {
+            var node = &cone->AtkResNode;
+            arrow = origin + new Vector2(node->ScreenX + node->Transform.M11 * node->OriginX + node->Transform.M21 * node->OriginY,
+                node->ScreenY + node->Transform.M12 * node->OriginX + node->Transform.M22 * node->OriginY);
+            return float.IsFinite(arrow.X) && float.IsFinite(arrow.Y);
+        }
+
+        var pin = addon->AreaMap.PlayerPin;
+        if (pin != null && ShownOnScreen(&pin->AtkResNode) && pin->AtkResNode.Width > 0)
+        {
+            var node = &pin->AtkResNode;
+            arrow = origin + new Vector2(node->ScreenX + node->Width * node->Transform.M11 / 2f + node->Height * node->Transform.M21 / 2f,
+                node->ScreenY + node->Width * node->Transform.M12 / 2f + node->Height * node->Transform.M22 / 2f);
+            return float.IsFinite(arrow.X) && float.IsFinite(arrow.Y);
+        }
+
+        return false;
     }
 
     private string MapTooltip(MapPoint marker)
