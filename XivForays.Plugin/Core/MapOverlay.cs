@@ -120,10 +120,21 @@ internal readonly record struct MapFilter(
             return true;
         if (PendingOnly && !pendingRespawn)
             return false;
-        if (SpawnsNowOnly && condition == ConditionState.Unavailable)
+        if (!SpawnsNow.Shows(SpawnsNowOnly, condition, false))
             return false;
         return ShowsStatus(status);
     }
+}
+
+/// <summary>
+/// The "Spawns now only" rule shared by the map (9), the nearby list (1) and the world markers (5, 6): a point whose
+/// condition (night, weather, FATE) is known to be unmet now is left out; an unknown condition stays; the picked point
+/// always stays.
+/// </summary>
+internal static class SpawnsNow
+{
+    public static bool Shows(bool spawnsNowOnly, ConditionState condition, bool picked) =>
+        picked || !spawnsNowOnly || condition != ConditionState.Unavailable;
 }
 
 /// <summary>Limits of the map markers: drawn markers per view, and the hover distance of the tooltip.</summary>

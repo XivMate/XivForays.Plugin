@@ -100,6 +100,8 @@ internal class GeneralTab(
             ImGui.Indent();
             changed |= Box("Point to the picked row##OverlayPointer", configuration.OverlayPointer, v => configuration.OverlayPointer = v,
                 "For the row you clicked: a marker over the spot, a guide line on the ground from you to it, and an arrow with the distance at the screen edge when it is off screen.");
+            changed |= Box("Spawns now only##OverlayListSpawnsNow", configuration.OverlayListSpawnsNow, v => configuration.OverlayListSpawnsNow = v,
+                "Leaves out points whose condition is known to be unmet right now (night, weather or FATE, as in box 8). Unknown conditions stay listed; the picked row always stays.");
             ImGui.Unindent();
         }
 
@@ -121,6 +123,14 @@ internal class GeneralTab(
 
         changed |= Box("6. Markers on empty needed points##OverlayEmptyPoints", configuration.OverlayEmptyPoints, v => configuration.OverlayEmptyPoints = v,
             "Markers where a needed spawn point is not currently occupied. Approximate (walk-past) points are hollow; points with an uncertain height stay in the list only.");
+        if (configuration.OverlayEnemyMarkers || configuration.OverlayEmptyPoints)
+        {
+            ImGui.Indent();
+            changed |= Box("Spawns now only (5 and 6)##OverlayWorldSpawnsNow", configuration.OverlayWorldSpawnsNow, v => configuration.OverlayWorldSpawnsNow = v,
+                "Markers in the world leave out points whose condition is known to be unmet right now (night, weather or FATE, as in box 8). Unknown conditions stay shown; the picked point always stays.");
+            ImGui.Unindent();
+        }
+
         changed |= Box("7. Pack watch##OverlayPackWatch", configuration.OverlayPackWatch, v => configuration.OverlayPackWatch = v,
             "After you (or your party) kill a pack: a ring at each spawn point waiting for its respawn, the best spot to stand and the area from where all of them are within the radius below, and one status line until all of them are back.");
         ImGui.Indent();

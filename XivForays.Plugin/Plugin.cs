@@ -70,6 +70,8 @@ public sealed class Plugin : IDalamudPlugin
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration.Configuration ??
                         new Configuration.Configuration();
+        if (Configuration.MigrateOverlay())
+            PluginInterface.SavePluginConfig(Configuration);
 
         SetupServices();
         InitializeModules();

@@ -4,7 +4,7 @@ using XivMate.DataGathering.Forays.Dalamud.Core;
 namespace XivMate.DataGathering.Forays.Dalamud.Configuration;
 
 /// <summary>
-/// Collector overlay settings (0.0.0.16). Everything is off by default; a saved config from 0.0.0.15 or older has no
+/// Collector overlay settings (0.0.0.16). Every feature is off by default (the "Spawns now only" filters are on); a saved config from 0.0.0.15 or older has no
 /// such keys, so the initializers below apply and the overlay stays off. Dependency-free so it can be unit tested.
 /// </summary>
 public partial class Configuration
@@ -56,8 +56,17 @@ public partial class Configuration
     public bool OverlayMapWalkPast { get; set; } = true;
     public bool OverlayMapNeverSeen { get; set; } = true;
 
-    /// <summary>9. Hide points whose condition (night, weather, FATE) is known to be unmet now.</summary>
-    public bool OverlayMapSpawnsNow { get; set; } = false;
+    /// <summary>
+    /// 9. Hide points whose condition (night, weather, FATE) is known to be unmet now. On by default; a config saved
+    /// before overlay settings version 1 stored false here without the choice being made, so <see cref="MigrateOverlay"/> turns it on.
+    /// </summary>
+    public bool OverlayMapSpawnsNow { get; set; } = true;
+
+    /// <summary>1. The nearby list leaves out points whose condition is known to be unmet now (the picked row stays).</summary>
+    public bool OverlayListSpawnsNow { get; set; } = true;
+
+    /// <summary>5 and 6. Markers in the world leave out points whose condition is known to be unmet now (the picked point stays).</summary>
+    public bool OverlayWorldSpawnsNow { get; set; } = true;
 
     /// <summary>9. Only points of recently killed enemies that wait for their respawn.</summary>
     public bool OverlayMapPendingOnly { get; set; } = false;
@@ -76,6 +85,30 @@ public partial class Configuration
 
     /// <summary>Quick "Hide overlay": hides the drawing and the window but keeps the settings and the data.</summary>
     public bool OverlayHidden { get; set; } = false;
+
+    /// <summary>The overlay settings version this build writes.</summary>
+    public const int CurrentOverlayVersion = 1;
+
+    /// <summary>
+    /// Version of the overlay settings in this config. A config saved before version 1 has no such key and reads 0.
+    /// Kept apart from the Dalamud <c>Version</c> so this file stays dependency-free.
+    /// </summary>
+    public int OverlaySettingsVersion { get; set; } = 0;
+
+    /// <summary>
+    /// Brings a loaded config up to <see cref="CurrentOverlayVersion"/>. Version 1: "Spawns now only" on the map is on
+    /// by default, also for configs that stored the old default (false). Returns true when something changed and the
+    /// config should be saved.
+    /// </summary>
+    public bool MigrateOverlay()
+    {
+        if (OverlaySettingsVersion >= CurrentOverlayVersion)
+            return false;
+        if (OverlaySettingsVersion < 1)
+            OverlayMapSpawnsNow = true;
+        OverlaySettingsVersion = CurrentOverlayVersion;
+        return true;
+    }
 
     /// <summary>The settings in force, with every value clamped to its range.</summary>
     internal OverlayFeatures OverlayFeatures => new(
@@ -102,7 +135,9 @@ public partial class Configuration
         OverlayEnabled && OverlayMap,
         new MapFilter(OverlayMapConfirmed, OverlayMapToConfirm, OverlayMapWalkPast, OverlayMapNeverSeen, OverlayMapSpawnsNow,
             OverlayMapPendingOnly),
-        Math.Clamp(OverlayMapMaxMarkers, MapRates.MinMaxMarkers, MapRates.MaxMaxMarkers));
+        Math.Clamp(OverlayMapMaxMarkers, MapRates.MinMaxMarkers, MapRates.MaxMaxMarkers),
+        OverlayEnabled && OverlayNearbyList && OverlayListSpawnsNow,
+        OverlayEnabled && OverlayWorldSpawnsNow);
 }
 
 /// <summary>The overlay settings as one value (master switch already applied to each feature).</summary>
@@ -129,7 +164,9 @@ internal readonly record struct OverlayFeatures(
     bool Hidden,
     bool Map,
     MapFilter MapFilter,
-    int MapMaxMarkers)
+    int MapMaxMarkers,
+    bool ListSpawnsNow,
+    bool WorldSpawnsNow)
 {
     /// <summary>The coverage file is downloaded only when the master switch is on.</summary>
     public bool NeedsDownload => Enabled;

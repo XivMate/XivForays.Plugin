@@ -138,8 +138,63 @@ public class MapOverlayTests
         Assert.True(filter.ShowsStatus(CoverageStatus.WalkPast));
         Assert.True(filter.ShowsStatus(CoverageStatus.NeverSeen));
         Assert.False(filter.ShowsStatus(CoverageStatus.Unknown));
-        Assert.False(filter.SpawnsNowOnly);
+        Assert.True(filter.SpawnsNowOnly);
         Assert.False(filter.PendingOnly);
+    }
+
+    [Fact]
+    public void SpawnsNowIsOnByDefaultForTheListAndTheWorldMarkers()
+    {
+        var config = new PluginConfiguration { OverlayEnabled = true, OverlayNearbyList = true };
+        Assert.True(config.OverlayFeatures.ListSpawnsNow);
+        Assert.True(config.OverlayFeatures.WorldSpawnsNow);
+        config.OverlayListSpawnsNow = false;
+        config.OverlayWorldSpawnsNow = false;
+        Assert.False(config.OverlayFeatures.ListSpawnsNow);
+        Assert.False(config.OverlayFeatures.WorldSpawnsNow);
+        // The master switch and the list switch gate them.
+        Assert.False(new PluginConfiguration().OverlayFeatures.ListSpawnsNow);
+        Assert.False(new PluginConfiguration().OverlayFeatures.WorldSpawnsNow);
+        Assert.False(new PluginConfiguration { OverlayEnabled = true }.OverlayFeatures.ListSpawnsNow);
+    }
+
+    [Fact]
+    public void SpawnsNowRuleKeepsThePickedPointAndUnknownConditions()
+    {
+        Assert.False(SpawnsNow.Shows(true, ConditionState.Unavailable, false));
+        Assert.True(SpawnsNow.Shows(true, ConditionState.Unavailable, true));
+        Assert.True(SpawnsNow.Shows(true, ConditionState.Unknown, false));
+        Assert.True(SpawnsNow.Shows(true, ConditionState.Available, false));
+        Assert.True(SpawnsNow.Shows(false, ConditionState.Unavailable, false));
+        // The map filter uses the same rule, the picked point included.
+        var filter = new PluginConfiguration().OverlayFeatures.MapFilter;
+        Assert.True(filter.Shows(CoverageStatus.ToConfirm, ConditionState.Unavailable, false, true));
+    }
+
+    [Fact]
+    public void OldConfigThatStoredTheOldDefaultGetsSpawnsNowOn()
+    {
+        // A 0.0.0.16 config saved before the change: no overlay settings version, the map filter stored as false.
+        var old = Newtonsoft.Json.JsonConvert.DeserializeObject<PluginConfiguration>(
+            "{\"OverlayEnabled\":true,\"OverlayMap\":true,\"OverlayMapSpawnsNow\":false}")!;
+        Assert.False(old.OverlayMapSpawnsNow);
+        Assert.True(old.MigrateOverlay());
+        Assert.True(old.OverlayMapSpawnsNow);
+        Assert.Equal(PluginConfiguration.CurrentOverlayVersion, old.OverlaySettingsVersion);
+        Assert.True(old.OverlayListSpawnsNow); // keys it never had take the new defaults
+        Assert.True(old.OverlayWorldSpawnsNow);
+        // A choice made after the migration is kept.
+        old.OverlayMapSpawnsNow = false;
+        Assert.False(old.MigrateOverlay());
+        Assert.False(old.OverlayMapSpawnsNow);
+        var saved = Newtonsoft.Json.JsonConvert.DeserializeObject<PluginConfiguration>(Newtonsoft.Json.JsonConvert.SerializeObject(old))!;
+        Assert.False(saved.MigrateOverlay());
+        Assert.False(saved.OverlayMapSpawnsNow);
+        // A fresh config is on and lands on the current version.
+        var fresh = new PluginConfiguration();
+        fresh.MigrateOverlay();
+        Assert.True(fresh.OverlayMapSpawnsNow);
+        Assert.Equal(PluginConfiguration.CurrentOverlayVersion, fresh.OverlaySettingsVersion);
     }
 
     [Fact]

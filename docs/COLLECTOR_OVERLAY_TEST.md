@@ -1,7 +1,10 @@
 # Collector overlay: in-game test checklist (0.0.0.16, round 1 fixes and the in-game map)
 
 Work through the sections in order. Each one turns on one more checkbox, so a problem points at one feature. Tick the
-boxes in `/xivforays config`, **General**, section **Collector overlay**. Every checkbox starts off.
+boxes in `/xivforays config`, **General**, section **Collector overlay**. Every numbered checkbox starts off. The **Spawns now
+only** filters (list, world markers, map) start on: points whose condition (night, weather, FATE) is known to be unmet
+right now are left out, unknown conditions stay, and the picked point always stays. A config saved before this build
+also gets the map one turned on once, even if it was stored as off; after that your choice is kept.
 
 Good test spots: an ordinary Anemos or Pagos camp with a few needed points (Walk-past, To confirm or Never seen) and a
 normal ~50 s respawn. Avoid FATEs for sections 2 to 4 until the end. For sections 2 and 7, a Pagos or Pyros
@@ -36,8 +39,10 @@ Fail if:
 
 ## 1. Nearby needed list and the pointer
 
-What to do: tick **1. Nearby needed list** (its sub-option **Point to the picked row** is on by default). Stand in a
-camp, then walk 100 y or so in one direction. Click a row, turn the camera away from that point, then walk to it.
+What to do: tick **1. Nearby needed list** (its sub-options **Point to the picked row** and **Spawns now only** are on
+by default). Stand in a camp, then walk 100 y or so in one direction. Click a row, turn the camera away from that
+point, then walk to it. By day near night-only enemies (or a sprite spot outside its weather), untick and tick
+**Spawns now only**.
 
 What you should see:
 
@@ -53,6 +58,9 @@ What you should see:
   compass direction ("42 y NE", north is up on the map). Confirmed points are not in the list.
 - Clicking a row picks it: the row is highlighted and starts with ">", and the line under the list says "Picked: the
   game points to it". Clicking it again lets go (Unpin in section 3 does the same).
+- **Spawns now only** on: no rows for points whose condition is unmet now (night-only by day, sprites outside their
+  weather, FATE-only points while the FATE is not up); "any time" and unknown conditions stay. Off: those rows come
+  back (greyed with box 8). A picked row stays in the list even when its condition goes unmet.
 - For the picked point, in the game view: a cyan beacon (vertical line) over the spot with a small ring at its foot
   and "<name>  42 y" above it, and a dashed cyan guide on the ground from your feet to the spot.
 - When the spot is off screen (behind you or beyond the screen edge): a cyan arrow at the screen edge pointing the way
@@ -64,6 +72,8 @@ What you should see:
 Fail if:
 
 - The list shows Confirmed points, or points from another zone.
+- With Spawns now only on, a row whose condition is unmet now is listed (other than the picked one), or an "any time"
+  row is missing.
 - Directions are mirrored (a point to the north of you on the map shows S), or the edge arrow points away from the
   spot.
 - The guide or beacon is drawn while no row is picked, or for a row other than the picked one.
@@ -156,7 +166,8 @@ Fail if:
 ## 5. Status markers over visible enemies
 
 What to do: tick **5. Status markers over visible enemies**. Look at a camp with mixed statuses. Then tick **Show
-confirmed**. Pull an enemy away from its spawn.
+confirmed**. Pull an enemy away from its spawn. Under box 6 the option **Spawns now only (5 and 6)** (on by default,
+shown when box 5 or 6 is ticked) applies to these markers too.
 
 What you should see:
 
@@ -165,6 +176,8 @@ What you should see:
   Enemies the overlay cannot tie to a row say "Unmatched" (or "Ambiguous" when two rows tie).
 - A pulled enemy keeps its marker and status while it walks away.
 - Markers only within the display distance (default 100 y) and at most 64 in total.
+- Spawns now only (5 and 6) on: no marker over an enemy tied to a point whose condition is known to be unmet now
+  (the picked point and the 3 s Confirmed locally flash still show). Unmatched enemies keep their marker.
 
 Fail if:
 
@@ -184,11 +197,15 @@ What you should see:
 - Points with an uncertain height get no marker (they stay in the list with ", height uncertain"). Nothing is drawn
   far under the ground.
 - When the enemy respawns, the empty marker goes and (with box 5) the enemy marker takes its place.
+- Spawns now only (5 and 6) on: no empty marker on points whose condition is unmet now (night-only by day, sprites
+  outside their weather, FATE-only outside their FATE); the picked point keeps its marker. Off: they come back, faded
+  with box 8.
 
 Fail if:
 
 - A marker sits deep underground or high in the air.
 - An occupied point also shows an empty marker at the same time.
+- With Spawns now only on, an empty marker shows on a point whose condition is unmet now (other than the picked one).
 
 ## 7. Pack watch
 
@@ -257,16 +274,16 @@ the nearest to you are drawn first, at most **Max map markers** (400 by default,
 covered yet: it draws from a rotating render texture whose scale needs its own check in game, so it comes later.
 
 What to do: tick **9. Show on the in-game map**. Its status boxes start as To confirm, Walk-past only and Never seen
-on, Confirmed off. Open the area map (default M) in Anemos or Pagos. Zoom in and out, drag the map, move and resize
-the map window. Hover a few markers. Then try each status box, **Spawns now only** (at night or in a weather some
+on, Confirmed off, and **Spawns now only** on (also on a config from an earlier build that had it off). Open the area map (default M) in Anemos or Pagos. Zoom in and out, drag the map, move and resize
+the map window. Hover a few markers. Then try each status box, **Spawns now only** off and on again (at night or in a weather some
 enemies need, best with box 8 on to compare) and **Pending respawn only** (kill two or three enemies at needed points
 first). Click a row in the list (box 1) and look for it on the map. With Pack watch on (box 7), kill a pack.
 
 What you should see:
 
 - Small markers in the in-world colours and shapes: diamond To confirm, hollow circle Walk-past, circle with "?" Never
-  seen, check mark Confirmed. Points whose condition is unmet now are faded, never hidden unless **Spawns now only**
-  is ticked.
+  seen, check mark Confirmed. With **Spawns now only** off, points whose condition is unmet now are drawn faded; with it
+  on (the default) they are hidden.
 - The markers sit on the right spots and stay on them while you zoom, drag and move the window. Nothing is drawn
   outside the map view.
 - The window line "Map: N markers in view (M match the filters), arrow check K px". K is how far the game's own player

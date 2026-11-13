@@ -401,9 +401,11 @@ internal sealed class CollectorOverlayService : IDisposable
             var dx = point.X - player.X;
             var dz = point.Z - player.Z;
             var d2 = dx * dx + dz * dz;
-            if (want > 0)
+            var picked = point.Key == pinnedKey;
+            if (want > 0 && SpawnsNow.Shows(features.ListSpawnsNow, EvaluateCondition(point), picked))
                 Insert(point, MathF.Sqrt(d2), want);
-            if (features.EmptyPoints && emptyCount < MaxEmpty && d2 <= display2 && point.HeightKnown && !session.IsOccupied(point))
+            if (features.EmptyPoints && emptyCount < MaxEmpty && d2 <= display2 && point.HeightKnown && !session.IsOccupied(point) &&
+                SpawnsNow.Shows(features.WorldSpawnsNow, EvaluateCondition(point), picked))
             {
                 var greyed = ConditionOf(point) == ConditionState.Unavailable;
                 empty[emptyCount++] = new EmptyMarker(point.Key, new Vector3(point.X, point.Y, point.Z), status,
@@ -873,6 +875,9 @@ internal sealed class CollectorOverlayService : IDisposable
                     status = CoverageStatus.Unknown;
                 var flash = local != null && now - local.AtMs <= OverlayRates.ConfirmFlashMs;
                 if (status == CoverageStatus.Confirmed && !features.ShowConfirmed && !flash)
+                    continue;
+                if (enemy.Match.Point is { } matched && !flash &&
+                    !SpawnsNow.Shows(features.WorldSpawnsNow, EvaluateCondition(matched), matched.Key == pinnedKey))
                     continue;
                 if (!labels.TryClaim(enemy.Match.Point?.Key, enemy.Anchor))
                     continue;
