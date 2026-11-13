@@ -1,4 +1,4 @@
-# Collector overlay: in-game test checklist (0.0.0.16, round 1 fixes)
+# Collector overlay: in-game test checklist (0.0.0.16, round 1 fixes and the in-game map)
 
 Work through the sections in order. Each one turns on one more checkbox, so a problem points at one feature. Tick the
 boxes in `/xivforays config`, **General**, section **Collector overlay**. Every checkbox starts off.
@@ -245,10 +245,60 @@ Fail if:
 - A point is greyed while its weather, time or FATE is active.
 - A point is greyed only because the condition text is unknown.
 
+## 9. Show on the in-game map
+
+How it works (approach): the points are drawn with ImGui over the game's own area map window, not added as game map
+markers. Game markers (the map agent's marker list) are a short fixed list that the game rebuilds itself, which does
+not fit 1,200 points per zone; drawing over the window keeps the plugin read-only (nothing in the game is
+changed). The map image node of the open map tells where the map texture is on screen, so markers follow zoom, pan,
+window moves and the UI scale; the map agent gives the open map's id, size factor and offsets (world x/z to texture
+pixel: `(world + offset) * sizeFactor / 100 + 1024` on the 2048 pixel texture). Markers are culled to the map view,
+the nearest to you are drawn first, at most **Max map markers** (400 by default, 50 to 1,500). The minimap is not
+covered yet: it draws from a rotating render texture whose scale needs its own check in game, so it comes later.
+
+What to do: tick **9. Show on the in-game map**. Its status boxes start as To confirm, Walk-past only and Never seen
+on, Confirmed off. Open the area map (default M) in Anemos or Pagos. Zoom in and out, drag the map, move and resize
+the map window. Hover a few markers. Then try each status box, **Spawns now only** (at night or in a weather some
+enemies need, best with box 8 on to compare) and **Pending respawn only** (kill two or three enemies at needed points
+first). Click a row in the list (box 1) and look for it on the map. With Pack watch on (box 7), kill a pack.
+
+What you should see:
+
+- Small markers in the in-world colours and shapes: diamond To confirm, hollow circle Walk-past, circle with "?" Never
+  seen, check mark Confirmed. Points whose condition is unmet now are faded, never hidden unless **Spawns now only**
+  is ticked.
+- The markers sit on the right spots and stay on them while you zoom, drag and move the window. Nothing is drawn
+  outside the map view.
+- The window line "Map: N markers in view (M match the filters), arrow check K px". K is how far the game's own player
+  arrow is from where the overlay puts you; a few pixels is fine. "Map: showing another map ..." when you look at a
+  different zone or a world map: then nothing is drawn.
+- Hover: a tooltip with the enemy name, "Lv N" once an enemy of that kind was seen this session, the status, "When:"
+  and the condition (with the reason when unmet now), and for a pending respawn "Respawn ~32 s" (or "Back at night
+  ...").
+- **Spawns now only**: night-only points vanish by day, weather points vanish outside their weather, FATE points while
+  the FATE is not up; "any time" and unknown conditions stay.
+- **Pending respawn only**: only the points of enemies that died recently and are waiting to respawn, each with a green
+  ring; a point leaves as soon as its enemy is back. FATE enemies are not included.
+- The picked row: a large cyan ring with a cross, shown even when its status box is off or the cap is reached.
+- Pack watch: sky blue rings on the waiting points, the safe area outline (amber outside, green inside) and the best
+  spot cross, the same as in the world.
+- Closing the map removes everything at once; framerate does not drop with the map open.
+
+Fail if:
+
+- Markers are offset from where the enemies stand (say so with the "arrow check" number and the zoom level), or drift
+  when you zoom or drag.
+- Markers are drawn outside the map view, over the map's buttons, or stay after the map closes.
+- A filter hides a point it should keep (for example an "any time" point with Spawns now only).
+- The framerate drops noticeably with the map open.
+
+The first time the map opens after the plugin loads, `dalamud.log` gets one line starting "Collector overlay map view"
+with the map numbers. If the markers are offset, please send that line.
+
 ## Options
 
 - **Display distance**, **Marker scale**, **Marker opacity**, **Max markers**, **List rows**: each takes effect at
-  once.
+  once. Marker scale and opacity also apply to the map markers (section 9).
 - **Hide while in combat**: window and markers vanish when you enter combat and return when it ends.
 - **Hide overlay** (also a button in the window): hides everything at once; recording continues. Untick it in General
   to bring the overlay back.
