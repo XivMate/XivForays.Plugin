@@ -30,6 +30,8 @@
         <Compile Include="..\XivForays.Plugin\Models\PlayerContext.cs" Link="Plugin\Models\PlayerContext.cs" />
         <!-- Only the dependency-free part of the plugin Configuration (the per-content recording toggles). -->
         <Compile Include="..\XivForays.Plugin\Configuration\Configuration.Recording.cs" Link="Plugin\Configuration\Configuration.Recording.cs" />
+        <!-- The collector overlay settings (0.0.0.16), dependency-free like the recording toggles. -->
+        <Compile Include="..\XivForays.Plugin\Configuration\Configuration.Overlay.cs" Link="Plugin\Configuration\Configuration.Overlay.cs" />
     </ItemGroup>
 
     <ItemGroup Condition="Exists('$(LuminaDir)Lumina.dll') And Exists('$(LuminaDir)Lumina.Excel.dll')">

@@ -13,11 +13,11 @@ An opt-in, passive Dalamud plugin that contributes world observations from Eurek
    ```
 
 3. Open `/xlplugins`, find **XivMate Foray Data Gathering** and choose **Install**. Use a Dalamud build that supports API 15 for version 0.0.0.14.
-4. Get your own API key from Jake or the [Forays site](https://web.xivforays.com/). Enter it in the first-run window or under **System** in `/xivforays config`. Keep the default API URL `https://web.xivforays.com/api/forays/`. Enable **Crowdsource data** in **General** when you want to contribute.
+4. Get your own API key from the maintainer or the [Forays site](https://web.xivforays.com/). Enter it in the first-run window or under **System** in `/xivforays config`. Keep the default API URL `https://web.xivforays.com/api/forays/`. Enable **Crowdsource data** in **General** when you want to contribute.
 
 To update, open `/xlplugins` and install the available update. Keep the same repository URL. If you previously loaded a developer copy or used an older repository entry for this plugin, remove that entry before installing from the Friends feed.
 
-The URL becomes available once Jake publishes the first Friends release. Dalamud needs to be able to open it without signing in. [Custom repository documentation](https://dalamud.dev/plugin-publishing/custom-repositories/)
+The URL becomes available once the maintainer publishes the first Friends release. Dalamud needs to be able to open it without signing in. [Custom repository documentation](https://dalamud.dev/plugin-publishing/custom-repositories/)
 
 ## Privacy: exactly what is sent
 
@@ -40,6 +40,39 @@ Every upload carries the plugin version and the API key you entered (to authenti
 **Never sent or logged:** chat text from any channel (say, party, FC, linkshell, tell, ...), chat sender names, player or character names, character/content/account IDs, other players' positions or data, names or IDs of your party members (only their job, level, role and foray level), inventory, retainers, screenshots, or files. The plugin only looks at the system loot/error channels for your own notices and keeps the numbers. It does not write chat, names, request bodies or your API key to `dalamud.log`; its log lines are short status messages (for example "observations endpoint returned 404").
 
 Turn off **Crowdsource data** in `/xivforays config` under **General** to stop collecting and clear pending uploads (a request already in flight may still finish). See [what we collect](docs/WHAT_WE_COLLECT.md) for a plain summary and the [capture specification](docs/CAPTURE_SPEC.md) for field names and limits.
+
+## Collector overlay (optional, from 0.0.0.16)
+
+An optional helper for collectors in the four Eureka field zones (Anemos, Pagos, Pyros, Hydatos). It is **off by
+default**, and each part has its own checkbox so it can be turned on one at a time. Find it in `/xivforays config`,
+**General**, section **Collector overlay**:
+
+- **Enable collector overlay** is the master switch. Off means no downloads, no window, no drawing and no extra work
+  in the enemy scan.
+- 1 nearby needed list (pick a row and the game points to it), 2 respawn countdown, 3 range and readiness,
+  4 "Confirmed locally" feedback, 5 status markers over visible enemies (with **Show confirmed**), 6 markers on empty
+  needed points, 7 pack watch (with optional single-point 80 y / 70 y rings), 8 spawn conditions. Options: display
+  distance (default 100 y, up to 150 y), marker scale and opacity, max markers (64), list rows, hide while in combat,
+  and a quick **Hide overlay**.
+
+What it does and does not do:
+
+- It downloads the public coverage file of the zone you are in (`https://beta.xivforays.com/live/coverage-<zone>.json`,
+  the same data the site shows) about every 3 minutes, with a cache check so an unchanged file costs very little. The
+  request is anonymous: no API key, no cookies, no character, world or position. The last good file is kept in the
+  plugin's own folder so the overlay works offline. **It sends nothing.**
+- It only reads. It never targets, moves, presses keys, sends game packets, changes the camera or places waymarks. The
+  labels are drawn on screen at projected world positions; they are not occlusion aware.
+- Live feedback (timers, readiness, "Confirmed locally") comes from the normal recording scan, so it needs
+  **Crowdsource data** and **Record in Eureka**. The overlay never changes what is recorded (capture revision
+  unchanged).
+- "Confirmed locally" uses the same rule as the server: an enemy seen spawning with a valid home, or a respawn watched
+  from within 100 y. A respawn timer is an estimate (about 50 s for ordinary enemies, 146 s for night-only and
+  191 s for weather-only enemies, measured from collected data) and never confirms anything. Night and weather enemies
+  say when they can be back ("Back at night (ET 18:00, in ~12 min)") while their condition is not met.
+- Bozja, Zadnor, the Occult Crescent and the Baldesion Arsenal show "Coverage not available".
+
+The in-game test checklist is [docs/COLLECTOR_OVERLAY_TEST.md](docs/COLLECTOR_OVERLAY_TEST.md).
 
 ## Build and release
 

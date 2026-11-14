@@ -64,16 +64,21 @@ public sealed class Plugin : IDalamudPlugin
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
     private ApiKeyWindow ApiKeyWindow { get; set; }
+    private CollectorOverlayService CollectorOverlay { get; init; }
 
     public Plugin()
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration.Configuration ??
                         new Configuration.Configuration();
+        if (Configuration.MigrateOverlay())
+            PluginInterface.SavePluginConfig(Configuration);
 
         SetupServices();
         InitializeModules();
 
         MainWindow = provider?.GetService<MainWindow>() ?? throw new InvalidOperationException();
+        CollectorOverlay = provider.GetRequiredService<CollectorOverlayService>();
+        CollectorOverlay.ApplyConfig(Configuration);
         PluginInterface.UiBuilder.Draw += DrawUI;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUI;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
@@ -147,6 +152,7 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton<EnemyTrackingService>();
         services.AddSingleton<EnemyLocationGatherer>();
         services.AddSingleton<ForayService>();
+        services.AddSingleton<CollectorOverlayService>();
         services.AddAllTypesImplementing<ITab>();
         services.AddSingleton<ObservationService>();
         services.AddSingleton<IModule>(sp => sp.GetRequiredService<ObservationService>());
@@ -180,7 +186,11 @@ public sealed class Plugin : IDalamudPlugin
             ToggleMainUI();
     }
 
-    private void DrawUI() => WindowSystem.Draw();
+    private void DrawUI()
+    {
+        WindowSystem.Draw();
+        CollectorOverlay.Draw();
+    }
 
     public void ToggleConfigUI() => ConfigWindow.Toggle();
     public void ToggleMainUI() => MainWindow.Toggle();
@@ -189,5 +199,6 @@ public sealed class Plugin : IDalamudPlugin
     {
         foreach (var module in provider.GetServices<IModule>())
             module.LoadConfig(Configuration);
+        CollectorOverlay.ApplyConfig(Configuration);
     }
 }

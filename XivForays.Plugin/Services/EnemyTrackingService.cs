@@ -27,6 +27,12 @@ public sealed class EnemyTrackingService(
     private readonly HashSet<Guid> defeatLinked = new();
     private Guid visitId;
 
+    /// <summary>
+    /// The collector overlay's session, set only while the overlay is on and a feature uses live enemies. Null means
+    /// the scan does no overlay work at all. Read-only: the overlay never changes what is recorded.
+    /// </summary>
+    internal CollectorSession? Overlay { get; set; }
+
     public bool IsInRecordableTerritory() => forayService.IsInRecordableTerritory() && objectTable.LocalPlayer != null;
 
     public Dictionary<ulong, EnemyPosition> GetVisibleEnemies()
@@ -71,6 +77,20 @@ public sealed class EnemyTrackingService(
         }
 
         poseCapture.BeginScan(context);
+        var overlay = Overlay;
+        if (overlay != null)
+        {
+            var playerPosition = objectTable.LocalPlayer?.Position;
+            OverlaySafe(() => overlay.BeginScan(Environment.TickCount64, playerPosition));
+            var inner = record;
+            record = observation =>
+            {
+                inner(observation);
+                if (observation.Kind is ObservationKind.EnemyAppeared or ObservationKind.EnemySpawnPose or ObservationKind.EnemyFormChange)
+                    OverlaySafe(() => overlay.Evidence(observation));
+            };
+        }
+
         var next = new Dictionary<ulong, TrackedEnemy>();
         var nextRecorded = new Dictionary<ulong, (float X, float Y, float Z)>();
         var snapshot = new List<EnemyPosition>();
@@ -109,6 +129,9 @@ public sealed class EnemyTrackingService(
             {
                 if (previous is { IsDead: false })
                 {
+                    if (Overlay != null)
+                        OverlaySafe(() => overlay!.Died(current.Id, current.Position.MobIngameId, current.LayoutId, current.Home,
+                            new Vector3(current.Position.X, current.Position.Y, current.Position.Z), current.FateId));
                     var chain = playerContext.ChainAt(context.ObservedAtMs);
                     var (claim, claimType, lastTarget) = poseCapture.Died(enemy, current.Id, current.LayoutId,
                         current.Home ?? current.FirstPosition, PoseMath.Form(current.Position.IsMutated, current.Position.IsAdapted));
@@ -127,6 +150,12 @@ public sealed class EnemyTrackingService(
                 continue;
             }
 
+            if (Overlay != null)
+                OverlaySafe(() => overlay!.Seen(current.Id, current.Position.MobIngameId, current.LayoutId, current.Home,
+                    current.FirstPosition, new Vector3(current.Position.X, current.Position.Y, current.Position.Z),
+                    current.Position.IsInCombat, current.FateId));
+            if (Overlay != null)
+                OverlaySafe(() => overlay!.NoteLevel(current.Position.MobIngameId, current.ForayLevel is > 0 ? current.ForayLevel.Value : current.CombatLevel));
             poseCapture.Observe(enemy, current.Id, replacedTrackId, current.Position.IsMutated, current.Position.IsAdapted,
                 current.LayoutId, context, record);
 
@@ -170,6 +199,8 @@ public sealed class EnemyTrackingService(
         }
 
         poseCapture.EndScan(context, record);
+        if (Overlay != null)
+            OverlaySafe(() => overlay!.EndScan());
         var liveTracks = next.Values.Select(enemy => enemy.Id).ToHashSet();
         defeatLinked.RemoveWhere(trackId => !liveTracks.Contains(trackId));
         tracked = next;
@@ -205,6 +236,8 @@ public sealed class EnemyTrackingService(
 
         var (target, chosen) = found[choice.Index];
         defeatLinked.Add(chosen.Id);
+        if (Overlay is { } session)
+            OverlaySafe(() => session.DefeatLinked(chosen.Id, defeat.DefeatBy ?? 0));
         var form = PoseMath.Form(chosen.Position.IsMutated, chosen.Position.IsAdapted);
         return defeat with
         {
@@ -225,6 +258,23 @@ public sealed class EnemyTrackingService(
             EnemyCandidates = choice.Candidates
         };
     }
+
+    /// <summary>The overlay must never break recording: a failure detaches it until it is turned on again.</summary>
+    private void OverlaySafe(System.Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception)
+        {
+            Overlay = null;
+            OverlayFaulted = true;
+        }
+    }
+
+    /// <summary>The overlay hook failed once and was detached (shown in the overlay window).</summary>
+    internal bool OverlayFaulted { get; set; }
 
     private static bool IsEnemy(IBattleNpc enemy) =>
         enemy.BattleNpcKind == BattleNpcSubKind.Combatant && enemy.BaseId != 0 && enemy.Address != IntPtr.Zero;
