@@ -56,6 +56,9 @@ internal sealed class OverlayDeath
     /// <summary>0 = observed death (killer unknown), 1 = your kill, 2 = a party member's kill (kind 13 defeat links).</summary>
     public byte DefeatBy { get; set; }
 
+    /// <summary>The death joined the pack watch (a later defeat link does not add it again).</summary>
+    public bool InPack { get; set; }
+
     public float MaxPlayerDistance { get; set; }
 }
 
@@ -107,7 +110,10 @@ internal sealed class CollectorSession
 
     public WatchMeter Meter { get; } = new();
 
-    /// <summary>Pack watch: own and party kills waiting for their respawn, anchored at the respawn spot.</summary>
+    /// <summary>
+    /// Pack watch: own and party kills, and observed deaths at needed points, waiting for their respawn, anchored at the
+    /// respawn spot.
+    /// </summary>
     public PackWatch Pack { get; } = new();
 
     /// <summary>Pack watch on: kills are added to <see cref="Pack"/>.</summary>
@@ -261,16 +267,22 @@ internal sealed class CollectorSession
     public static string PackKey(OverlayDeath death) => death.PointKey ?? "track:" + death.TrackId.ToString("N");
 
     /// <summary>
-    /// An own or party kill of a non-FATE enemy joins the pack watch, anchored exactly like its countdown (the death's
-    /// <see cref="OverlayDeath.Anchor"/>: the matched row, else the home, else the death spot flagged approximate).
+    /// A non-FATE death joins the pack watch, anchored exactly like its countdown (the death's
+    /// <see cref="OverlayDeath.Anchor"/>: the matched row, else the home, else the death spot flagged approximate). An
+    /// own or party kill always joins. An observed death (killer unknown) joins only when it matched a coverage point
+    /// that is not Confirmed: only then is it known to be an enemy whose respawn is still needed.
     /// </summary>
     private void AddToPack(OverlayDeath death)
     {
-        if (!PackEnabled || death.DefeatBy == 0 || death.FateBound)
+        if (!PackEnabled || death.FateBound || death.InPack)
             return;
         CoveragePoint? point = null;
         if (death.PointKey != null)
             snapshot?.ByKey.TryGetValue(death.PointKey, out point);
+        var alreadyDone = point != null && StatusOf(point, out _) == CoverageStatus.Confirmed;
+        if (death.DefeatBy == 0 && (point == null || alreadyDone))
+            return;
+        death.InPack = true;
         Pack.Killed(new PackPoint
         {
             Key = PackKey(death),
@@ -280,7 +292,7 @@ internal sealed class CollectorSession
             HeightKnown = death.HeightKnown,
             Source = death.AnchorSource,
             Condition = point?.Condition ?? "",
-            AlreadyDone = point != null && StatusOf(point, out _) == CoverageStatus.Confirmed,
+            AlreadyDone = alreadyDone,
             DiedAtMs = death.DiedAtMs
         });
     }

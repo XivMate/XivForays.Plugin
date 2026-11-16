@@ -220,7 +220,8 @@ Fail if:
 ## 7. Pack watch
 
 What to do: tick **7. Pack watch** (Keep within: 60 y by default, 50 to 80 y; a margin under the 80 y rule). Kill a
-pack of 4 or 5 enemies at needed points (party kills count too). Walk away from all of them, then follow the advice
+pack of 4 or 5 enemies at needed points (party kills count too, and so do other players' kills of enemies at
+points that are not Confirmed yet). Walk away from all of them, then follow the advice
 until all have respawned. Then try a pack whose points are more than 2 x 60 y apart, and (at dusk or near a weather
 change) a pack with a night-only or weather enemy in it.
 
@@ -231,8 +232,10 @@ What you should see:
   It shrinks or grows as points respawn or drop out. No ring per enemy by default.
 - The area is built from where the enemies will respawn, not where you killed them: pull a pack 30 to 40 y and kill
   it there, and the area stays round the spawn points. The spot of each enemy is the same as the section 2 clock: the
-  matched coverage row, else the enemy's home, else (no row and no home) the death spot. Kills with no matched row
-  join the pack too (named "Enemy <id>"), anchored at their home.
+  matched coverage row, else the enemy's home, else (no row and no home) the death spot. Your or party kills with no
+  matched row join the pack too (named "Enemy <id>"), anchored at their home. A death you only saw (another player's
+  kill) joins only when it matched a point that is not Confirmed; one with no matched row, or at a Confirmed point,
+  stays out.
 - A "Best spot" cross in the area (the centre of the smallest circle round the waiting points).
 - The fill is drawn ahead of you when you stand inside the area too (a part behind the camera is left out, never
   stretched across the screen).

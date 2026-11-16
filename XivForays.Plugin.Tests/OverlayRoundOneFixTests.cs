@@ -399,7 +399,8 @@ public class OverlayRoundOneFixTests
     public void TheSessionAddsOwnKillsToThePackAndSeesTheRespawn()
     {
         var session = new CollectorSession { PackEnabled = true, PackRadius = 60 };
-        session.SetSnapshot(new CoverageSnapshot(Pagos, "x", [Row("layout:7", 9000, 7, 100, 200), Row("layout:8", 9000, 8, 130, 200)]));
+        session.SetSnapshot(new CoverageSnapshot(Pagos, "x",
+            [Row("layout:7", 9000, 7, 100, 200), Row("layout:8", 9000, 8, 130, 200, status: CoverageStatus.Confirmed)]));
         var first = Guid.NewGuid();
         var other = Guid.NewGuid();
         session.BeginScan(1000, new Vector3(110, 10, 200));
@@ -410,7 +411,7 @@ public class OverlayRoundOneFixTests
         session.Died(first, 9000, 7, new Vector3(100, 10, 200), new Vector3(100, 10, 200), 0);
         session.Died(other, 9000, 8, new Vector3(130, 10, 200), new Vector3(130, 10, 200), 0);
         session.DefeatLinked(first, 1); // your kill
-        Assert.Single(session.Pack.Points); // an observed death (no defeat link) is not part of the pack
+        Assert.Single(session.Pack.Points); // an observed death at a Confirmed point is not part of the pack
         Assert.Equal("layout:7", session.Pack.Points[0].Key);
 
         session.BeginScan(60_000, new Vector3(110, 10, 200));
@@ -504,6 +505,122 @@ public class OverlayRoundOneFixTests
         session.Died(track, 9000, 7, new Vector3(100, 10, 200), new Vector3(100, 10, 200), 0);
         session.DefeatLinked(track, 1);
         Assert.Empty(session.Pack.Points);
+    }
+
+    // ---- observed deaths (killer unknown) at needed points ----
+
+    private static CollectorSession ObservedSession(out Guid track, CoverageStatus status = CoverageStatus.ToConfirm,
+        bool matched = true, ushort fate = 0, bool packEnabled = true)
+    {
+        var session = new CollectorSession { PackEnabled = packEnabled, PackRadius = 60 };
+        session.SetSnapshot(new CoverageSnapshot(Pagos, "x", [Row("layout:7", 9000, 7, 100, 200, status: status)]));
+        track = Guid.NewGuid();
+        var layout = matched ? 7u : 0u;
+        var bnpc = matched ? 9000u : 9100u;
+        var home = matched ? new Vector3(100, 10, 200) : new Vector3(400, 10, 200);
+        session.BeginScan(1000, new Vector3(110, 10, 200));
+        session.Seen(track, bnpc, layout, home, home, home, false, fate);
+        session.EndScan();
+        session.BeginScan(1500, new Vector3(110, 10, 200));
+        session.Died(track, bnpc, layout, home, home, fate);
+        return session;
+    }
+
+    [Fact]
+    public void AnObservedDeathAtANeededPointJoinsThePack()
+    {
+        var session = ObservedSession(out _);
+        var point = Assert.Single(session.Pack.Points);
+        Assert.Equal("layout:7", point.Key);
+        Assert.Equal(PackOutcome.Pending, point.Outcome);
+        Assert.Equal(new Vector3(100, 10, 200), point.Anchor);
+        Assert.Equal(0, Assert.Single(session.Deaths).DefeatBy);
+
+        // It works through the rest of the pack watch: the best spot, then the respawn.
+        Assert.True(session.Pack.Status(new Vector3(110, 10, 200), 60, 2000, _ => false, -1).HasSpot);
+        session.BeginScan(60_000, new Vector3(110, 10, 200));
+        session.Seen(Guid.NewGuid(), 9000, 7, new Vector3(100, 10, 200), new Vector3(100, 10, 200), new Vector3(100, 10, 200), false, 0);
+        Assert.Equal(PackOutcome.Respawned, session.Pack.Points[0].Outcome);
+    }
+
+    [Fact]
+    public void AnObservedDeathTimesOutLikeAKill()
+    {
+        var session = ObservedSession(out _);
+        session.Pack.Expire(1500 + PackWatch.KeepMs + 1, _ => true);
+        Assert.Equal(PackOutcome.TimedOut, Assert.Single(session.Pack.Points).Outcome);
+    }
+
+    [Fact]
+    public void AnObservedDeathAtAConfirmedPointStaysOut()
+    {
+        Assert.Empty(ObservedSession(out _, CoverageStatus.Confirmed).Pack.Points);
+    }
+
+    [Fact]
+    public void AnUnmatchedObservedDeathStaysOut()
+    {
+        var session = ObservedSession(out _, matched: false);
+        Assert.Null(Assert.Single(session.Deaths).PointKey);
+        Assert.Empty(session.Pack.Points);
+    }
+
+    [Fact]
+    public void AnObservedFateDeathStaysOut()
+    {
+        Assert.Empty(ObservedSession(out _, fate: 1234).Pack.Points);
+    }
+
+    [Fact]
+    public void AnObservedDeathLaterLinkedAsYourKillIsOneEntry()
+    {
+        var session = ObservedSession(out var track);
+        var before = Assert.Single(session.Pack.Points);
+        session.DefeatLinked(track, 1);
+        var after = Assert.Single(session.Pack.Points);
+        Assert.Same(before, after);
+        Assert.Equal(PackOutcome.Pending, after.Outcome);
+        Assert.Equal(1, Assert.Single(session.Deaths).DefeatBy);
+        // A second notice for the same track changes nothing either.
+        session.DefeatLinked(track, 2);
+        Assert.Single(session.Pack.Points);
+    }
+
+    [Fact]
+    public void OwnKillsAreUnchangedConfirmedAndUnmatchedIncluded()
+    {
+        // Your kill at a Confirmed point joins as already done (an observed death there did not join first).
+        var confirmed = ObservedSession(out var a, CoverageStatus.Confirmed);
+        Assert.Empty(confirmed.Pack.Points);
+        confirmed.DefeatLinked(a, 1);
+        Assert.Equal(PackOutcome.AlreadyDone, Assert.Single(confirmed.Pack.Points).Outcome);
+
+        // A party kill with no matched row joins, keyed by its track.
+        var unmatched = ObservedSession(out var b, matched: false);
+        unmatched.DefeatLinked(b, 2);
+        Assert.StartsWith("track:", Assert.Single(unmatched.Pack.Points).Key);
+
+        // The notice before the scan sees HP 0: the death arrives as your kill.
+        var session = new CollectorSession { PackEnabled = true, PackRadius = 60 };
+        session.SetSnapshot(new CoverageSnapshot(Pagos, "x", [Row("layout:7", 9000, 7, 100, 200)]));
+        var c = Guid.NewGuid();
+        session.BeginScan(1000, new Vector3(110, 10, 200));
+        session.Seen(c, 9000, 7, new Vector3(100, 10, 200), new Vector3(100, 10, 200), new Vector3(100, 10, 200), false, 0);
+        session.DefeatLinked(c, 1);
+        session.Died(c, 9000, 7, new Vector3(100, 10, 200), new Vector3(100, 10, 200), 0);
+        Assert.Equal(PackOutcome.Pending, Assert.Single(session.Pack.Points).Outcome);
+        Assert.Equal(1, Assert.Single(session.Deaths).DefeatBy);
+
+        // A FATE kill of your own stays out, as before.
+        var fate = ObservedSession(out var d, fate: 1234);
+        fate.DefeatLinked(d, 1);
+        Assert.Empty(fate.Pack.Points);
+    }
+
+    [Fact]
+    public void ObservedDeathsStayOutWhenPackWatchIsOff()
+    {
+        Assert.Empty(ObservedSession(out _, packEnabled: false).Pack.Points);
     }
 
     // ---- settings and the edge arrow ----
