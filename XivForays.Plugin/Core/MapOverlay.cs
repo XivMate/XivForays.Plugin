@@ -36,8 +36,9 @@ internal static class MapMath
 /// The area map's numbers for one frame, read fresh from the live map window every frame (nothing here is cached):
 /// the map image node's on-screen rectangle, the map component's rectangle, the accumulated UI scale (screen pixels
 /// per node pixel, which includes the window's own scale and the global UI scale), the zoom (node pixels per texture
-/// pixel) and the pan of the map component, and the image part (U, V, width, height in texture pixels) the image node
-/// shows. The image node is a window onto the 2048 texture, not the whole texture: zoom and pan decide what it shows.
+/// pixel) and the pan of the map component, the image part (U, V, width, height in texture pixels) the image node
+/// shows, and the map component's own map size (node pixels, its MapWidth x MapHeight). The image node is a window onto
+/// the 2048 texture, not the whole texture: zoom and pan decide what it shows.
 /// </summary>
 internal readonly record struct MapFrame(
     Vector2 ImageMin,
@@ -47,9 +48,33 @@ internal readonly record struct MapFrame(
     float UiScale,
     float Zoom,
     Vector2 Pan,
-    Vector4 Part)
+    Vector4 Part,
+    Vector2 MapSize = default)
 {
+    /// <summary>A part shape is known (it may still lie outside the texture, see <see cref="PartInTexture"/>).</summary>
     public bool HasPart => Part.Z > 0 && Part.W > 0 && ImageMax.X > ImageMin.X && ImageMax.Y > ImageMin.Y;
+
+    /// <summary>
+    /// The part lies on the 2048 texture (a few texels of rounding allowed). Zoomed out past the map window the game
+    /// reports parts like 1770/1628 2328x2144, which are not a window onto the texture, and the image part model is then
+    /// hundreds of pixels off (live log, 16 Nov).
+    /// </summary>
+    public bool PartInTexture => HasPart && Part.X >= -PartSlack && Part.Y >= -PartSlack &&
+                                 Part.X + Part.Z <= MapMath.TextureSize + PartSlack &&
+                                 Part.Y + Part.W <= MapMath.TextureSize + PartSlack;
+
+    private const float PartSlack = 4f;
+
+    /// <summary>The map component's map size and the frame corner are known: the map centre can be placed.</summary>
+    public bool HasMapSize => MapSize.X > 0 && MapSize.Y > 0 && UiScale > 0 && float.IsFinite(UiScale) &&
+                              FrameMax.X > FrameMin.X && FrameMax.Y > FrameMin.Y;
+
+    /// <summary>
+    /// The screen point the map view is centred on: the frame corner plus half the component's map size. The frame
+    /// node itself is smaller (706 x 497 node pixels against a 724 x 535 map), so its own centre is 9 x 19 node pixels
+    /// (31 screen pixels at scale 1.5) up and left of the real centre.
+    /// </summary>
+    public Vector2 MapCentre => FrameMin + MapSize / 2f * UiScale;
 
     /// <summary>The rectangle markers may be drawn in: the map image, inside the map component when both are known.</summary>
     public (Vector2 Min, Vector2 Max) Clip()
@@ -62,13 +87,17 @@ internal readonly record struct MapFrame(
 
 /// <summary>
 /// The ways the texture can sit in the map window. Model 0 uses the image part (what the image node shows of the
-/// texture). The others put texture pixel 1024 at the centre of the image (1 to 4) or of the map component (5 to 8),
-/// moved by the pan, with the pan added or subtracted and counted in texture pixels or in node pixels. The game's own
-/// player arrow picks the model that fits; the gap of every model goes to the log once per map open.
+/// texture). Models 1 to 8 put texture pixel 1024 at the centre of the image (1 to 4) or of the frame node (5 to 8),
+/// moved by the pan, with the pan added or subtracted and counted in texture pixels or in node pixels. Model 9 puts it
+/// at the map centre (<see cref="MapFrame.MapCentre"/>) with the pan subtracted: the one placement that fits all 14 live
+/// lines of 16 Nov (Pagos and Hydatos, zoom 0.25 to 2). The gap of every model goes to the log once per map open.
 /// </summary>
 internal static class MapModels
 {
-    public const int Count = 9;
+    public const int Count = 10;
+
+    /// <summary>Texture pixel 1024 + pan at the map centre.</summary>
+    public const int MapCentre = 9;
 
     public static string Name(int model) => model switch
     {
@@ -81,14 +110,15 @@ internal static class MapModels
         6 => "frame centre -pan",
         7 => "frame centre +pan/zoom",
         8 => "frame centre -pan/zoom",
+        9 => "map centre -pan",
         _ => "none"
     };
 
     /// <summary>
-    /// The model used before the player arrow has picked one: the image part when it is known, else the image centre
-    /// with the pan subtracted (the image centre shows texture pixel 1024 + pan, as in the live Pagos and Hydatos logs).
+    /// The model used before the player arrow has picked one: the map centre when the map size is known, else the image
+    /// part when it lies on the texture, else the frame centre with the pan subtracted (about 31 px off, but steady).
     /// </summary>
-    public static int Default(in MapFrame frame) => frame.HasPart ? 0 : 2;
+    public static int Default(in MapFrame frame) => frame.HasMapSize ? MapCentre : frame.PartInTexture ? 0 : 6;
 }
 
 /// <summary>
@@ -121,6 +151,13 @@ internal readonly record struct MapView(
             var size = frame.ImageMax - frame.ImageMin;
             ppt = frame.HasPart ? new Vector2(size.X / frame.Part.Z, size.Y / frame.Part.W) : Vector2.Zero;
             origin = frame.ImageMin - new Vector2(frame.Part.X, frame.Part.Y) * ppt;
+        }
+        else if (model == MapModels.MapCentre)
+        {
+            // Texture pixel t is at the map centre + (t - 1024 - pan) * zoom * UI scale.
+            var scale = frame.Zoom * frame.UiScale;
+            ppt = frame.HasMapSize ? new Vector2(scale, scale) : Vector2.Zero;
+            origin = frame.MapCentre - (frame.Pan + new Vector2(MapMath.TextureSize / 2f)) * scale;
         }
         else
         {
@@ -184,6 +221,9 @@ internal static class MapCalibration
             var view = MapView.From(frame, model, offsetX, offsetY, sizeFactor);
             var gap = view.Valid ? Vector2.Distance(view.ToScreen(playerXz.X, playerXz.Y), arrow) : float.NaN;
             gaps[model] = gap;
+            // An image part off the texture is logged but never picked: it only passes the arrow by chance.
+            if (model == 0 && !frame.PartInTexture)
+                continue;
             if (float.IsFinite(gap) && gap < bestGap)
             {
                 bestGap = gap;
@@ -195,13 +235,14 @@ internal static class MapCalibration
     }
 
     /// <summary>
-    /// The model for this frame. The image part model is read straight from what the map image shows, so it is used
-    /// whenever the image part is known; the arrow only checks it. Without an image part: the nearest model when the
-    /// arrow lands within <see cref="MapRates.PickLimitPixels"/>, else the last model picked (kept while the zone
-    /// stays), else the default.
+    /// The model for this frame. The map centre model whenever the map size is known (it fits every live line, zoomed
+    /// in and out); else the image part model when the part lies on the texture; the arrow only checks these. Otherwise
+    /// the nearest model when the arrow lands within <see cref="MapRates.PickLimitPixels"/>, else the last model picked
+    /// (kept while the zone stays), else the default.
     /// </summary>
     public static int Choose(int best, float bestGap, int sticky, in MapFrame frame) =>
-        frame.HasPart ? 0
+        frame.HasMapSize ? MapModels.MapCentre
+        : frame.PartInTexture ? 0
         : best >= 0 && bestGap <= MapRates.PickLimitPixels ? best
         : sticky >= 0 ? sticky
         : MapModels.Default(frame);

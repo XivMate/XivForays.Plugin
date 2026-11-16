@@ -1152,7 +1152,8 @@ internal sealed class CollectorOverlayService : IDisposable
         }
 
         var frame = new MapFrame(imageMin, imageMax, frameMin, frameMax, scale.X, addon->AreaMap.MapScale,
-            new Vector2(addon->AreaMap.MapOffsetX, addon->AreaMap.MapOffsetY), part);
+            new Vector2(addon->AreaMap.MapOffsetX, addon->AreaMap.MapOffsetY), part,
+            new Vector2(component->MapWidth, component->MapHeight));
         if (mapModelMapId != mapId)
         {
             mapModelMapId = mapId;
@@ -1174,7 +1175,8 @@ internal sealed class CollectorOverlayService : IDisposable
         float offsetX = mapSheetOffsetX, offsetY = mapSheetOffsetY, sizeFactor = mapSheetSizeFactor;
         var playerXz = new Vector2(player.X, player.Z);
 
-        // The game's own player arrow is the self-check ("map check K px"); it picks a model only without an image part.
+        // The game's own player arrow is the self-check ("map check K px"); it picks a model only when neither the map
+        // size nor an image part on the texture is known.
         var hasArrow = TryPlayerArrow(addon, origin, out var arrow);
         Span<float> gaps = stackalloc float[MapModels.Count];
         var view = MapCalibration.Resolve(frame, offsetX, offsetY, sizeFactor, playerXz, hasArrow ? arrow : null, ref mapModel,
@@ -1209,7 +1211,7 @@ internal sealed class CollectorOverlayService : IDisposable
                 ? arrow.X.ToString("0", CultureInfo.InvariantCulture) + "/" + arrow.Y.ToString("0", CultureInfo.InvariantCulture)
                 : "not read";
             log.Information(string.Create(CultureInfo.InvariantCulture,
-                $"Collector overlay map view: map {mapId}, size factor {sizeFactor}, offset {offsetX}/{offsetY} (sheet; agent size factor {agent->SelectedMapSizeFactor}, offset {agent->SelectedOffsetX}/{agent->SelectedOffsetY}), image {image->Width}x{image->Height} at {imageMin.X:0}/{imageMin.Y:0} to {imageMax.X:0}/{imageMax.Y:0}, transform {image->Transform.M11:0.###}/{image->Transform.M22:0.###}, walked scale {walked.X:0.###}/{walked.Y:0.###}, addon scale {addon->AtkUnitBase.Scale:0.###}, part {part.X}/{part.Y} {part.Z}x{part.W}, frame {frameMin.X:0}/{frameMin.Y:0} to {frameMax.X:0}/{frameMax.Y:0}, zoom {frame.Zoom:0.####}, pan {frame.Pan.X:0.#}/{frame.Pan.Y:0.#}, component zoom {component->MapScale:0.####} pan {component->MapOffsetX:0.#}/{component->MapOffsetY:0.#} size {component->MapWidth:0.#}x{component->MapHeight:0.#}, arrow {arrowText}, player {playerOnMap.X:0}/{playerOnMap.Y:0}, model {MapModels.Name(model)}, map check {gap} px{(aligned ? " (aligned)" : "")}; model gaps: {gapText}"));
+                $"Collector overlay map view: map {mapId}, size factor {sizeFactor}, offset {offsetX}/{offsetY} (sheet; agent size factor {agent->SelectedMapSizeFactor}, offset {agent->SelectedOffsetX}/{agent->SelectedOffsetY}), image {image->Width}x{image->Height} at {imageMin.X:0}/{imageMin.Y:0} to {imageMax.X:0}/{imageMax.Y:0}, transform {image->Transform.M11:0.###}/{image->Transform.M22:0.###}, walked scale {walked.X:0.###}/{walked.Y:0.###}, addon scale {addon->AtkUnitBase.Scale:0.###}, part {part.X}/{part.Y} {part.Z}x{part.W}, frame {frameMin.X:0}/{frameMin.Y:0} to {frameMax.X:0}/{frameMax.Y:0}, zoom {frame.Zoom:0.####}, pan {frame.Pan.X:0.#}/{frame.Pan.Y:0.#}, component zoom {component->MapScale:0.####} pan {component->MapOffsetX:0.#}/{component->MapOffsetY:0.#} size {component->MapWidth:0.#}x{component->MapHeight:0.#}, map centre {frame.MapCentre.X:0}/{frame.MapCentre.Y:0}, arrow {arrowText}, player {playerOnMap.X:0}/{playerOnMap.Y:0}, model {MapModels.Name(model)}, map check {gap} px{(aligned ? " (aligned)" : "")}; model gaps: {gapText}"));
         }
 
         var list = ImGui.GetBackgroundDrawList();

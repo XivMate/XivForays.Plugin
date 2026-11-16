@@ -95,104 +95,136 @@ public class MapLiveLogTests
 
     // ---- drag and zoom replays ----
 
+    private static readonly Vector2 ComponentMapSize = new(724, 535);
+
     /// <summary>
-    /// One frame of a drag: the same image rectangle as the logged frame, the given zoom and pan. The image centre shows
-    /// texture pixel 1024 + pan (both logged lines), so the part follows the pan.
+    /// One frame as the game draws it (the live lines of 16 Nov): texture pixel 1024 + pan sits at the map centre
+    /// (frame corner + half the 724 x 535 map at the UI scale), zoom x UI scale screen pixels per texel. The frame node is
+    /// 706 x 497 node pixels, as logged. The image node covers the texture's part of the map window; when the texture
+    /// does not fill the window (zoomed out) the game's part numbers do not describe the texture (logged 1770/1628
+    /// 2328x2144 and the like), mimicked here by a part off the texture.
     /// </summary>
-    private static MapFrame DragFrame(in MapFrame logged, float zoom, Vector2 pan)
+    internal static MapFrame GameFrame(Vector2 frameMin, float zoom, Vector2 pan, float uiScale = 1.5f)
     {
-        var size = (logged.ImageMax - logged.ImageMin) / (zoom * logged.UiScale);
-        var uv = new Vector2(MapMath.TextureSize / 2f) + pan - size / 2f;
-        return logged with { Zoom = zoom, Pan = pan, Part = new Vector4(uv.X, uv.Y, size.X, size.Y) };
+        var frameMax = frameMin + new Vector2(706, 497) * uiScale;
+        var mapMax = frameMin + ComponentMapSize * uiScale;
+        var centre = frameMin + ComponentMapSize / 2f * uiScale;
+        var scale = zoom * uiScale;
+        var textureMin = centre - (new Vector2(MapMath.TextureSize / 2f) + pan) * scale;
+        var textureMax = textureMin + new Vector2(MapMath.TextureSize) * scale;
+        var imageMin = Vector2.Max(textureMin, frameMin);
+        var imageMax = Vector2.Min(textureMax, mapMax);
+        var shownUv = (imageMin - textureMin) / scale;
+        var shownSize = (imageMax - imageMin) / scale;
+        var fills = textureMin.X <= frameMin.X && textureMin.Y <= frameMin.Y && textureMax.X >= mapMax.X && textureMax.Y >= mapMax.Y;
+        var part = fills
+            ? new Vector4(shownUv.X, shownUv.Y, shownSize.X, shownSize.Y)
+            : new Vector4(shownUv.X + 1700f, shownUv.Y + 1600f, ComponentMapSize.X / zoom, ComponentMapSize.Y / zoom);
+        return new MapFrame(imageMin, imageMax, frameMin, frameMax, uiScale, zoom, pan, part, ComponentMapSize);
     }
 
-    /// <summary>Where the game draws the player arrow in that frame: the player's texture pixel inside the shown part.</summary>
-    private static Vector2 ArrowOf(in MapFrame frame, Vector2 player, float offsetX, float offsetY, float sizeFactor)
+    /// <summary>Where the game draws a world point in that frame.</summary>
+    internal static Vector2 GameScreen(in MapFrame frame, Vector2 world, float offsetX, float offsetY, float sizeFactor)
     {
-        var texel = MapMath.ToTexture(player.X, player.Y, offsetX, offsetY, sizeFactor);
-        var ppt = (frame.ImageMax - frame.ImageMin) / new Vector2(frame.Part.Z, frame.Part.W);
-        return frame.ImageMin + (texel - new Vector2(frame.Part.X, frame.Part.Y)) * ppt;
+        var texel = MapMath.ToTexture(world.X, world.Y, offsetX, offsetY, sizeFactor);
+        return frame.FrameMin + ComponentMapSize / 2f * frame.UiScale +
+               (texel - new Vector2(MapMath.TextureSize / 2f) - frame.Pan) * frame.Zoom * frame.UiScale;
     }
 
-    private static bool OnImage(in MapFrame frame, Vector2 at) =>
-        at.X >= frame.ImageMin.X && at.X <= frame.ImageMax.X && at.Y >= frame.ImageMin.Y && at.Y <= frame.ImageMax.Y;
+    private static bool InFrame(in MapFrame frame, Vector2 at) =>
+        at.X >= frame.FrameMin.X && at.X <= frame.FrameMax.X && at.Y >= frame.FrameMin.Y && at.Y <= frame.FrameMax.Y;
 
-    /// <summary>A drag of 40 frames: pan swept by up to 300 texels each way, zoom stepped a few times on the way.</summary>
-    private static IEnumerable<MapFrame> Drag(MapFrame logged)
+    /// <summary>
+    /// 60 frames: a zoom sweep 0.25 to 2 and back while dragging the pan up to 400 texels each way from the player
+    /// (so the arrow leaves the window on some frames), at two window positions.
+    /// </summary>
+    private static IEnumerable<MapFrame> Replay(Vector2 playerTexelFromCentre)
     {
-        for (var i = 0; i < 40; i++)
+        for (var i = 0; i < 60; i++)
         {
-            var zoom = logged.Zoom * (i < 10 ? 1f : i < 20 ? 1.25f : i < 30 ? 0.8f : 1f);
-            var pan = logged.Pan + new Vector2(MathF.Sin(i / 6f) * 300f, MathF.Cos(i / 7f) * 250f - 250f);
-            yield return DragFrame(logged, zoom, pan);
+            var t = i / 59f;
+            var zoom = 0.25f + 1.75f * (t < 0.5f ? t * 2f : 2f - t * 2f);
+            var drag = new Vector2(MathF.Sin(i / 5f) * 400f, MathF.Cos(i / 7f) * 300f);
+            var corner = i < 30 ? new Vector2(-1343, 292) : new Vector2(-1718, 281);
+            yield return GameFrame(corner, zoom, playerTexelFromCentre + drag);
         }
     }
 
-    private static void ReplayStaysLocked(MapFrame logged, Vector2 player, float offsetX, float offsetY, float sizeFactor)
+    private static void ReplayStaysLocked(Vector2 player, float offsetX, float offsetY, float sizeFactor)
     {
+        var texel = MapMath.ToTexture(player.X, player.Y, offsetX, offsetY, sizeFactor) - new Vector2(MapMath.TextureSize / 2f);
         var sticky = -1;
         var gaps = new float[MapModels.Count];
-        var frames = 0;
-        foreach (var frame in Drag(logged))
+        int frames = 0, zoomedOut = 0, offTexture = 0, arrowGone = 0;
+        foreach (var frame in Replay(texel))
         {
-            var truth = ArrowOf(frame, player, offsetX, offsetY, sizeFactor);
-            // The arrow is read only while it is on the map image (panned away: not read).
-            Vector2? arrow = OnImage(frame, truth) ? truth : null;
+            var truth = GameScreen(frame, player, offsetX, offsetY, sizeFactor);
+            Vector2? arrow = InFrame(frame, truth) ? truth : null;
             var view = MapCalibration.Resolve(frame, offsetX, offsetY, sizeFactor, player, arrow, ref sticky, gaps, out var model, out _);
-            Assert.Equal(0, model);
+            Assert.Equal(MapModels.MapCentre, model);
             Assert.True(view.Valid);
-            // Every frame, arrow read or not: the drawn player is on the game's arrow, with no shift carried.
-            Assert.InRange(Vector2.Distance(view.ToScreen(player.X, player.Y), truth), 0f, 3f);
-            Assert.InRange(view.Shift.Length(), 0f, 3f);
-            // A marker 200 y away stays where the map has that spot.
-            var far = player + new Vector2(200f, -150f);
-            Assert.InRange(Vector2.Distance(view.ToScreen(far.X, far.Y), ArrowOf(frame, far, offsetX, offsetY, sizeFactor)), 0f, 3f);
+            Assert.InRange(Vector2.Distance(view.ToScreen(player.X, player.Y), truth), 0f, 1f);
+            Assert.InRange(view.Shift.Length(), 0f, 1f);
+            var far = player + new Vector2(200f, -150f) * (100f / sizeFactor);
+            Assert.InRange(Vector2.Distance(view.ToScreen(far.X, far.Y), GameScreen(frame, far, offsetX, offsetY, sizeFactor)), 0f, 1f);
             frames++;
+            if (frame.ImageMax.X - frame.ImageMin.X < frame.FrameMax.X - frame.FrameMin.X)
+                zoomedOut++;
+            if (!frame.PartInTexture)
+                offTexture++;
+            if (arrow == null)
+                arrowGone++;
         }
 
-        Assert.Equal(40, frames);
-        Assert.True(sticky is -1 or 0);
+        Assert.Equal(60, frames);
+        Assert.True(zoomedOut > 5, $"zoomed out frames {zoomedOut}");
+        Assert.True(offTexture > 5, $"off-texture parts {offTexture}");
+        Assert.True(arrowGone > 0, "the arrow never left the window");
+        Assert.True(sticky is -1 or MapModels.MapCentre);
     }
 
     [Fact]
-    public void AHydatosDragAndZoomStaysLockedToTheMap() =>
-        ReplayStaysLocked(Hydatos, HydatosPlayer, 0, HydatosSheetOffsetY, 100);
+    public void AHydatosDragAndZoomSweepStaysLockedToTheMap() =>
+        ReplayStaysLocked(HydatosPlayer, 0, HydatosSheetOffsetY, 100);
 
     [Fact]
-    public void APagosDragAndZoomStaysLockedToTheMap() =>
-        ReplayStaysLocked(Pagos, PagosPlayer, 0, 0, 100);
+    public void APagosDragAndZoomSweepStaysLockedToTheMap() =>
+        ReplayStaysLocked(PagosPlayer, 0, 0, 100);
 
     [Fact]
-    public void ABaldesionArsenalStyleMapGoesThroughTheSamePath() =>
+    public void ABaldesionArsenalStyleMapStaysLockedToo() =>
         // Map 520: size factor 200, sheet offset 0/-754 (job 1045 read of the Map sheet); a player near the entrance.
-        ReplayStaysLocked(Hydatos with { Zoom = 1f, Pan = new Vector2(0f, 400f) }, new Vector2(10f, 960f), 0, -754, 200);
+        ReplayStaysLocked(new Vector2(10f, 960f), 0, -754, 200);
 
     [Fact]
-    public void TheOldPickerWithTheAgentOffsetHopsAndSnapsDuringADrag()
+    public void TheSimulatedGameFramesMatchTheLiveLines()
     {
-        // The 0.0.0.16 selection, replayed: nearest model within 40 px is picked and kept, a gap up to 60 px is
-        // shifted away. With the agent's 0/-475 a wrong model passes near the arrow on some frames, is snapped onto it,
-        // and is kept on the next frames while the pan moves on: the "clicks, then goes the opposite way".
-        var sticky = -1;
-        var gaps = new float[MapModels.Count];
-        var used = new HashSet<int>();
-        var worst = 0f;
-        foreach (var frame in Drag(Hydatos))
+        // The simulator itself against the live lines: same arrow (within the 1 to 2 px the log rounds) for each line's
+        // zoom and pan, so the replays above stand on the game's numbers.
+        foreach (var line in MapLogLines.All)
         {
-            var truth = ArrowOf(frame, HydatosPlayer, 0, HydatosSheetOffsetY, 100);
-            var best = MapCalibration.Best(frame, 0, HydatosAgentOffsetY, 100, HydatosPlayer, truth, gaps);
-            var model = best >= 0 && gaps[best] <= MapRates.PickLimitPixels ? best : sticky >= 0 ? sticky : 1;
-            if (best >= 0 && gaps[best] <= MapRates.PickLimitPixels)
-                sticky = best;
-            used.Add(model);
-            var view = MapView.From(frame, model, 0, HydatosAgentOffsetY, 100)
-                .AlignedTo(HydatosPlayer, truth, MapRates.AlignTolerancePixels, MapRates.AlignLimitPixels, out _);
-            // A marker 200 y from the player: where the old view draws it against where the map has it.
-            var far = HydatosPlayer + new Vector2(200f, -150f);
-            worst = MathF.Max(worst, Vector2.Distance(view.ToScreen(far.X, far.Y), ArrowOf(frame, far, 0, HydatosSheetOffsetY, 100)));
+            var frame = GameFrame(line.Frame.FrameMin, line.Frame.Zoom, line.Frame.Pan);
+            Assert.Equal(line.Frame.FrameMax.X, frame.FrameMax.X, 1f);
+            Assert.Equal(line.Frame.FrameMax.Y, frame.FrameMax.Y, 1f);
+            var at = GameScreen(frame, line.PlayerWorld, line.SheetOffset.X, line.SheetOffset.Y, line.SizeFactor);
+            Assert.InRange(Vector2.Distance(at, line.Arrow), 0f, 5f);
+        }
+    }
+
+    [Fact]
+    public void ForcingTheImagePartWasWrongZoomedOut()
+    {
+        // Round 1 (job 1110) forced the image part model. On the zoomed-out live lines it is about 1085 px off, in
+        // Pagos too; the new choice does not use it there.
+        foreach (var line in MapLogLines.All)
+        {
+            if (line.Frame.PartInTexture)
+                continue;
+            var view = MapView.From(line.Frame, 0, line.SheetOffset.X, line.SheetOffset.Y, line.SizeFactor);
+            Assert.True(Vector2.Distance(view.ToScreen(line.PlayerWorld.X, line.PlayerWorld.Y), line.Arrow) > 700f, line.ToString());
+            Assert.NotEqual(0, MapCalibration.Choose(0, 0f, 0, line.Frame));
         }
 
-        Assert.True(worst > 100f, $"worst {worst}");
-        Assert.DoesNotContain(0, used);
+        Assert.Equal(8, MapLogLines.All.Count(l => !l.Frame.PartInTexture));
     }
 }
