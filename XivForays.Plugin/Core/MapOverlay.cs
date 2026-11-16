@@ -84,8 +84,11 @@ internal static class MapModels
         _ => "none"
     };
 
-    /// <summary>The model used before the player arrow has picked one: the image centre with the pan added.</summary>
-    public static int Default(in MapFrame frame) => 1;
+    /// <summary>
+    /// The model used before the player arrow has picked one: the image part when it is known, else the image centre
+    /// with the pan subtracted (the image centre shows texture pixel 1024 + pan, as in the live Pagos and Hydatos logs).
+    /// </summary>
+    public static int Default(in MapFrame frame) => frame.HasPart ? 0 : 2;
 }
 
 /// <summary>
@@ -192,11 +195,38 @@ internal static class MapCalibration
     }
 
     /// <summary>
-    /// The model for this frame: the nearest one when the arrow was read and it lands within
-    /// <see cref="MapRates.PickLimitPixels"/>; else the last model picked (kept while the zone stays); else the default.
+    /// The model for this frame. The image part model is read straight from what the map image shows, so it is used
+    /// whenever the image part is known; the arrow only checks it. Without an image part: the nearest model when the
+    /// arrow lands within <see cref="MapRates.PickLimitPixels"/>, else the last model picked (kept while the zone
+    /// stays), else the default.
     /// </summary>
     public static int Choose(int best, float bestGap, int sticky, in MapFrame frame) =>
-        best >= 0 && bestGap <= MapRates.PickLimitPixels ? best : sticky >= 0 ? sticky : MapModels.Default(frame);
+        frame.HasPart ? 0
+        : best >= 0 && bestGap <= MapRates.PickLimitPixels ? best
+        : sticky >= 0 ? sticky
+        : MapModels.Default(frame);
+
+    /// <summary>
+    /// The view for one frame (what the map draws with), and the model kept for the next frame in
+    /// <paramref name="sticky"/>. <paramref name="gaps"/> gets every model's gap to the arrow (NaN without an arrow).
+    /// A model is kept as sticky, and shifted the last few pixels onto the arrow, only when the arrow confirmed it this
+    /// frame (within <see cref="MapRates.PickLimitPixels"/>). A model that only passes near the arrow while the map is
+    /// dragged is never snapped onto it and then kept as the pan moves on.
+    /// </summary>
+    public static MapView Resolve(in MapFrame frame, float offsetX, float offsetY, float sizeFactor, Vector2 playerXz,
+        Vector2? arrow, ref int sticky, Span<float> gaps, out int model, out bool confirmed)
+    {
+        gaps.Fill(float.NaN);
+        var best = arrow is { } a ? Best(frame, offsetX, offsetY, sizeFactor, playerXz, a, gaps) : -1;
+        model = Choose(best, best >= 0 ? gaps[best] : float.MaxValue, sticky, frame);
+        confirmed = arrow != null && model < gaps.Length && float.IsFinite(gaps[model]) && gaps[model] <= MapRates.PickLimitPixels;
+        if (confirmed)
+            sticky = model;
+        var view = MapView.From(frame, model, offsetX, offsetY, sizeFactor);
+        return confirmed && arrow is { } at
+            ? view.AlignedTo(playerXz, at, MapRates.AlignTolerancePixels, MapRates.PickLimitPixels, out _)
+            : view;
+    }
 }
 
 /// <summary>Which spawn points feature 9 draws on the map.</summary>
@@ -258,7 +288,7 @@ internal static class MapRates
     /// <summary>The player arrow and the computed player point may differ by this much before the view is shifted.</summary>
     public const float AlignTolerancePixels = 3f;
 
-    /// <summary>A larger gap means the arrow reading is not usable for a shift.</summary>
+    /// <summary>A larger gap means the arrow reading is not usable for a shift (the shift also needs a confirmed model).</summary>
     public const float AlignLimitPixels = 60f;
 
     /// <summary>A model is picked by the arrow only when it puts the player this close to the arrow.</summary>
