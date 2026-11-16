@@ -341,5 +341,26 @@ public class MapOverlayTests
             Assert.Equal(1f, MapMath.ToMapCoordinate(-map.OffsetX - span / 2f, map.OffsetX, map.SizeFactor), 2);
         }
     }
+
+    [SkippableFact]
+    public void HydatosIsTheOnlyEurekaFieldMapWithAnOffset()
+    {
+        // Anemos (414), Pagos (467) and Pyros (484) are size factor 100 with offset 0/0; Hydatos (515) is size factor
+        // 100 with offset 0/475. Where the zones differ, only the offset term of the maths is exercised.
+        var game = Game.Value;
+        Skip.If(game == null, "No local game install (set XIV_SQPACK).");
+        var territories = game!.GetExcelSheet<TerritoryType>()!;
+        foreach (var id in new uint[] { ForayZones.EurekaAnemos, ForayZones.EurekaPagos, ForayZones.EurekaPyros })
+        {
+            var map = territories.GetRow(id).Map.Value;
+            Assert.Equal((100, 0, 0), ((int)map.SizeFactor, (int)map.OffsetX, (int)map.OffsetY));
+        }
+
+        var hydatos = territories.GetRow(ForayZones.EurekaHydatos).Map.Value;
+        Assert.Equal(515u, hydatos.RowId);
+        Assert.Equal((100, 0, 475), ((int)hydatos.SizeFactor, (int)hydatos.OffsetX, (int)hydatos.OffsetY));
+        // World z = -475 is the texture centre on Hydatos.
+        Assert.Equal(1024f, MapMath.ToTexture(-475f, hydatos.OffsetY, hydatos.SizeFactor), 2);
+    }
 #endif
 }
