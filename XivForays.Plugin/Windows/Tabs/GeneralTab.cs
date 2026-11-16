@@ -132,7 +132,7 @@ internal class GeneralTab(
         }
 
         changed |= Box("7. Pack watch##OverlayPackWatch", configuration.OverlayPackWatch, v => configuration.OverlayPackWatch = v,
-            "After you (or your party) kill a pack: one area on the ground (and on the map) from where every spawn point still waiting for its respawn is within the radius below, the best spot in it, and one status line until all of them are back. When no spot covers all of them, the area covers the most and the line says which are left out.");
+            "After you (or your party) kill a pack, or you see anyone kill enemies at spawn points that still need their respawn watched: one area on the ground (and on the map) from where every spawn point still waiting for its respawn is within the radius below, the best spot in it, and one status line until all of them are back. When no spot covers all of them, the area covers the most and the line says which are left out.");
         ImGui.Indent();
         if (configuration.OverlayPackWatch)
         {

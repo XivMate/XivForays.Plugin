@@ -262,7 +262,7 @@ internal readonly record struct PackStatus(
     bool Partial = false);
 
 /// <summary>
-/// The set of recently killed spawn points (own and party kills) waiting for their respawn. A point leaves the
+/// The set of recently killed spawn points (own and party kills, and deaths seen at needed points) waiting for their respawn. A point leaves the
 /// waiting set when it respawns, when its condition ends, or after 5 minutes. A kill after the whole pack resolved
 /// starts a new pack.
 /// </summary>
@@ -301,7 +301,7 @@ internal sealed class PackWatch
         }
     }
 
-    /// <summary>An own or party kill (a matched spawn point, or an unmatched kill keyed by its track).</summary>
+    /// <summary>A kill (a matched spawn point, or an unmatched own or party kill keyed by its track).</summary>
     public void Killed(PackPoint point)
     {
         if (PendingCount == 0 && points.Exists(p => p.Outcome is PackOutcome.Respawned or PackOutcome.ConditionEnded or PackOutcome.TimedOut))
