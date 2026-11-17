@@ -65,6 +65,9 @@ public sealed class Plugin : IDalamudPlugin
     private MainWindow MainWindow { get; init; }
     private ApiKeyWindow ApiKeyWindow { get; set; }
     private CollectorOverlayService CollectorOverlay { get; init; }
+#if DEV_SCANNER
+    private Dev.ScannerHost? devScanner;
+#endif
 
     public Plugin()
     {
@@ -85,6 +88,10 @@ public sealed class Plugin : IDalamudPlugin
         
         
         RegisterCommands();
+#if DEV_SCANNER
+        // Developer-only read-only value scanner; not part of the published build.
+        devScanner = new Dev.ScannerHost(Framework, CommandManager, Log, GameGui, System.IO.Path.Combine(PluginInterface.GetPluginConfigDirectory(), "dev-scanner"));
+#endif
 
         var tabs = provider.GetServices<ITab>();
         ConfigWindow = new ConfigWindow(this, tabs, Log);
@@ -165,6 +172,9 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+#if DEV_SCANNER
+        devScanner?.Dispose();
+#endif
         WindowSystem.RemoveAllWindows();
 
         ConfigWindow.Dispose();

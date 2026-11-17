@@ -34,6 +34,15 @@
         <Compile Include="..\XivForays.Plugin\Configuration\Configuration.Overlay.cs" Link="Plugin\Configuration\Configuration.Overlay.cs" />
     </ItemGroup>
 
+    <!-- Developer-only scanner: its pure logic is tested only with -p:DevScanner=true (never part of the release build). -->
+    <PropertyGroup Condition="'$(DevScanner)' == 'true'">
+        <DefineConstants>$(DefineConstants);DEV_SCANNER</DefineConstants>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(DevScanner)' == 'true'">
+        <Compile Include="..\XivForays.Plugin\Dev\ScanCore.cs;..\XivForays.Plugin\Dev\PointerScan.cs;..\XivForays.Plugin\Dev\ScannerController.cs" Link="Plugin\Dev\%(Filename)%(Extension)" />
+    </ItemGroup>
+
     <ItemGroup Condition="Exists('$(LuminaDir)Lumina.dll') And Exists('$(LuminaDir)Lumina.Excel.dll')">
         <Reference Include="Lumina" HintPath="$(LuminaDir)Lumina.dll" Private="true" />
         <Reference Include="Lumina.Excel" HintPath="$(LuminaDir)Lumina.Excel.dll" Private="true" />
