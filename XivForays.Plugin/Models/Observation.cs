@@ -36,7 +36,10 @@ internal enum ObservationKind
     EnemyAggro = 18,
 
     /// <summary>The local player's foray context (levels, magia board, chain, group jobs, allow-listed statuses, instance).</summary>
-    PlayerContext = 19
+    PlayerContext = 19,
+
+    /// <summary>Eurekan kettle light (Pagos, Pyros): a light notice, a change of the kettle value, or a forge conversion, linked to its cause. See docs/WHAT_WE_COLLECT.md.</summary>
+    KettleLight = 20
 }
 
 /// <summary>FATE result on FateEnded: from the end state (Ended/Failed), else from the last progress (100 = success).</summary>
@@ -188,4 +191,47 @@ internal sealed record Observation
 
     /// <summary>Kind 14: the loot and defeat notice hook is attached.</summary>
     public bool? LootListening { get; init; }
+
+    // Kettle light (kind 20). Row ids and numbers only: the notice text is never read. Also uses gameId (bnpc id),
+    // enemyCombatLevel, enemyElementalLevel, form, isMutated, isAdapted, defeatBy, defeatTrackId, chainNumber and
+    // chainAgeMs (all of the linked kill), fateRewardId (the linked FATE), and noticeRow.
+
+    /// <summary>Kind 20: the kettle value before the change (raw game value, unit unverified); absent when it cannot be read.</summary>
+    public uint? LightBefore { get; init; }
+
+    /// <summary>Kind 20: the kettle value after the change.</summary>
+    public uint? LightAfter { get; init; }
+
+    /// <summary>Kind 20: after minus before.</summary>
+    public int? LightDelta { get; init; }
+
+    /// <summary>Kind 20: the grade of the notice row: 1 feeble, 2 gentle, 3 bright, 4 brilliant, 5 blinding, 6 newborn star, 7 exploding star. Absent without a grade notice.</summary>
+    public byte? LightTier { get; init; }
+
+    /// <summary>Kind 20: true when the "cannot accumulate any more" notice came (the kettle was full).</summary>
+    public bool? LightFull { get; init; }
+
+    /// <summary>Kind 20: true when the crystal forge converted the light (the kettle was emptied).</summary>
+    public bool? ForgeEmptied { get; init; }
+
+    /// <summary>Kind 20: what produced the record: 1 notice only, 2 value change only, 3 both.</summary>
+    public byte? LightSource { get; init; }
+
+    /// <summary>Kind 20: 0 no cause found, 1 one kill, 2 one FATE completion, 3 ambiguous (several candidates, none chosen).</summary>
+    public byte? LightLink { get; init; }
+
+    /// <summary>Kind 20: how many kills and FATE completions were candidates in the window.</summary>
+    public byte? LightCandidates { get; init; }
+
+    /// <summary>Kind 20, ambiguous only: the track ids of the candidate kills (at most 8, newest first).</summary>
+    public Guid[]? LightCandidateTracks { get; init; }
+
+    /// <summary>Kind 20: ms from the linked kill or FATE completion to the notice or value change.</summary>
+    public uint? LightLinkAgeMs { get; init; }
+
+    /// <summary>Kind 20, FATE link: 1 when the player stood inside the FATE radius at completion (a proxy for credit), 0 outside.</summary>
+    public byte? LightFateCredit { get; init; }
+
+    /// <summary>Kind 20: the player's party size (1 = solo), a number only.</summary>
+    public byte? GroupSize { get; init; }
 }

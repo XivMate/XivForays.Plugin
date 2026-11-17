@@ -32,6 +32,7 @@ Sharing is off on a fresh install. Nothing is read or sent outside these zones, 
 | Enemies near you | game NPC ID, a random per-enemy track ID, position, levels, element, mutated/adapted, in-combat, model ID and scale; when they appear, die in view, leave view, change, move 15+ yalms, and every 30 s. The legacy snapshot with the enemy's game-defined name is off by default since 0.0.0.13 |
 | FATEs | FATE ID, game-defined FATE name (legacy route), centre, radius, start time, progress, state |
 | Critical engagements (Bozja, Zadnor, Occult Crescent) | encounter ID, state, progress, start time, seconds left, marker position and radius |
+| Eurekan kettle light (Pagos, Pyros) | the game's message number for each light notice (grade, full, forge), the kettle value before and after when readable, the kill or FATE it followed (monster id, level, mutated/adapted, your chain, own or party kill as a category), your party size. Numbers only; the message text is not read |
 | Coffers, bunnies, pots, carrots | game object ID, kind, grade when known, position |
 | Your own loot, EXP chain and defeat notices, and your party's defeat notices (any client language) | item ID and quantity, chain number, which monster was defeated (game ids) and whether by you or by a party member (category only, never which member), which kill a drop or chain followed, and whether a FATE had just finished. Numbers only; the notice text is discarded |
 

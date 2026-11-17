@@ -41,6 +41,9 @@ internal sealed partial class ForaySignalModule(
 
     private readonly NoticePairing pairing = new();
     private readonly DropLinker linker = new();
+    private readonly LightTracker light = new();
+    private readonly FateCompletionWatch fateWatch = new();
+    private readonly KettleLightValueSource lightSource = new();
     private readonly Lazy<long?> gameVersion = new(() =>
         LogNotices.GameVersionNumber(data.GameData.Repositories.TryGetValue("ffxiv", out var repo) ? repo.Version : null));
     private Dictionary<ulong, (uint BaseId, Vector3 Position)> treasures = new();
@@ -72,6 +75,8 @@ internal sealed partial class ForaySignalModule(
             lootListening = false;
             pairing.Clear();
             linker.Clear();
+            light.Clear();
+            fateWatch.Observe(Guid.Empty, [], 0, 0, 0);
             fateRewards.Clear();
             scheduler.CancelScheduledTask(SignalTick);
             scheduler.CancelScheduledTask(ResolveTick);
@@ -99,6 +104,12 @@ internal sealed partial class ForaySignalModule(
             int? Int(int index) => message.TryGetIntParameter(index, out var value) ? value : null;
             var row = message.LogMessageId;
             var now = Environment.TickCount64;
+            if (KettleRows.IsKettleRow(row))
+            {
+                RecordKettleNotice(row, player.Position);
+                return;
+            }
+
             if (LogNotices.Chain(row, Int) is { } chain)
             {
                 pairing.Structured((int)ObservationKind.Chain, now);
@@ -148,7 +159,16 @@ internal sealed partial class ForaySignalModule(
     /// <summary>A defeat notice (kind 13): the enemy is looked up now and, if not found yet, by <see cref="ResolveTick"/>.</summary>
     private void RecordDefeat(byte by, uint? enemyNameId)
     {
-        var defeat = observations.GetContext() with { Kind = ObservationKind.SelfDefeat, DefeatBy = by };
+        var context = observations.GetContext();
+        // Kettle light links to the chain at the kill, so the kill carries it (Pagos and Pyros only).
+        var chainAtKill = KettleRows.InKettleZone(context.TerritoryId) ? playerContext.ChainAt(context.ObservedAtMs) : default;
+        var defeat = context with
+        {
+            Kind = ObservationKind.SelfDefeat,
+            DefeatBy = by,
+            ChainNumber = chainAtKill.Number,
+            ChainAgeMs = chainAtKill.AgeMs
+        };
         linker.Defeat(defeat, enemyNameId, enemies.IdentifyDefeat, Emit);
     }
 
@@ -195,17 +215,61 @@ internal sealed partial class ForaySignalModule(
     /// <summary>Records only while the record's content (Eureka, Bozja, Occult Crescent) is ticked.</summary>
     private void Emit(Observation observation)
     {
-        if (forayService.IsContentEnabled(observation.TerritoryId))
-            observations.Record(observation);
+        if (!forayService.IsContentEnabled(observation.TerritoryId))
+            return;
+        if (observation.Kind == ObservationKind.SelfDefeat && KettleRows.InKettleZone(observation.TerritoryId))
+            light.NoteKill(observation.VisitId, observation.TerritoryId, LightKill.From(observation));
+        observations.Record(observation);
+    }
+
+    private LightSnapshot LightNow(long nowMs)
+    {
+        var chain = playerContext.ChainAt(nowMs);
+        return new LightSnapshot(chain.Number, chain.AgeMs, (byte)Math.Max(1, partyList.Length));
+    }
+
+    /// <summary>A kettle LogMessage row (grade, full, forge). Row id only: the message text is never read.</summary>
+    private void RecordKettleNotice(uint row, Vector3 playerPosition)
+    {
+        var context = observations.GetContext();
+        if (!KettleRows.InKettleZone(context.TerritoryId))
+            return;
+        light.Notice(context.ObservedAtMs, context.VisitId, context.TerritoryId, row, LightNow(context.ObservedAtMs));
+    }
+
+    /// <summary>Kind 20 housekeeping: finished events out, the kettle value polled, FATE completions noted.</summary>
+    private void LightTick(Observation context, Vector3 playerPosition)
+    {
+        var now = context.ObservedAtMs;
+        if (!KettleRows.InKettleZone(context.TerritoryId))
+        {
+            EmitLight(light.Flush(), context);
+            return;
+        }
+
+        foreach (var fate in fateWatch.Observe(context.VisitId, CurrentFates(context.TerritoryId), now, playerPosition.X,
+                     playerPosition.Z))
+            light.NoteFate(context.VisitId, context.TerritoryId, fate);
+        light.Value(now, context.VisitId, context.TerritoryId, lightSource.Read(), LightNow(now));
+        EmitLight(light.Tick(now), context);
+    }
+
+    private void EmitLight(List<LightEvent> events, Observation context)
+    {
+        foreach (var evt in events)
+            Emit(evt.ToObservation(context));
     }
 
     private void ResolveTick()
     {
-        if (!Enabled || linker.PendingCount == 0)
+        if (!Enabled || linker.PendingCount == 0 && light.PendingCount == 0)
             return;
         try
         {
-            linker.Tick(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), enemies.IdentifyDefeat, Emit);
+            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            linker.Tick(nowMs, enemies.IdentifyDefeat, Emit);
+            if (light.PendingCount > 0)
+                EmitLight(light.Tick(nowMs), observations.GetContext());
         }
         catch (Exception ex)
         {
@@ -274,6 +338,7 @@ internal sealed partial class ForaySignalModule(
             if (visitId != context.VisitId)
             {
                 linker.Flush(Emit);
+                EmitLight(light.Flush(), context);
                 visitId = context.VisitId;
                 treasures.Clear();
                 encounters.Clear();
@@ -291,6 +356,7 @@ internal sealed partial class ForaySignalModule(
             SampleTreasure(context);
             if (ForayZones.HasCriticalEngagements(context.TerritoryId))
                 SampleEncounters(context);
+            LightTick(context, player.Position);
             // Kind 19 player context: on change (at most every 5 s) or every 60 s.
             playerContext.Tick(context, observations.Record);
         }
