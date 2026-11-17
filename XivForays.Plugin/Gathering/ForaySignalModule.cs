@@ -43,7 +43,7 @@ internal sealed partial class ForaySignalModule(
     private readonly DropLinker linker = new();
     private readonly LightTracker light = new();
     private readonly FateCompletionWatch fateWatch = new();
-    private readonly KettleLightValueSource lightSource = new();
+    private readonly KettleLightValueSource lightSource = new(log, () => data.GameData.Repositories.TryGetValue("ffxiv", out var repo) ? repo.Version : null);
     private readonly Lazy<long?> gameVersion = new(() =>
         LogNotices.GameVersionNumber(data.GameData.Repositories.TryGetValue("ffxiv", out var repo) ? repo.Version : null));
     private Dictionary<ulong, (uint BaseId, Vector3 Position)> treasures = new();
