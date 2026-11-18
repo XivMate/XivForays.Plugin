@@ -53,18 +53,6 @@ public class PortalTrackerTests
     }
 
     [Fact]
-    public void EorzeaTimeIsMinutesSinceMidnight()
-    {
-        // 175 s is one Eorzea hour; 2.9166 s is one Eorzea minute.
-        Assert.Equal(0, EorzeaClock.EtMinuteOfDay(0));
-        Assert.Equal(60, EorzeaClock.EtMinuteOfDay(EorzeaClock.EtHourMs));
-        Assert.Equal(1439, EorzeaClock.EtMinuteOfDay(EorzeaClock.EtDayMs - 1));
-        Assert.Equal(0, EorzeaClock.EtMinuteOfDay(EorzeaClock.EtDayMs));
-        var record = Assert.Single(Run(new PortalTracker(), At(0), Blue()));
-        Assert.InRange(record.EorzeaMinutes!.Value, 0, 1439);
-    }
-
-    [Fact]
     public void SameObjectInTheSameVisitIsRecordedOnce()
     {
         var tracker = new PortalTracker();
@@ -164,7 +152,7 @@ public class PortalTrackerTests
         Assert.Equal(21, doc.RootElement.GetProperty("kind").GetInt32());
         Assert.Contains("portalColour", names);
         Assert.Contains("objectTrackId", names);
-        Assert.Contains("eorzeaMinutes", names);
+        Assert.DoesNotContain("eorzeaMinutes", names);
         Assert.DoesNotContain("123456789", json);
         Assert.DoesNotContain("name", names, StringComparer.OrdinalIgnoreCase);
     }

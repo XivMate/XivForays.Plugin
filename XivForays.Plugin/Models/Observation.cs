@@ -198,9 +198,6 @@ internal sealed record Observation
     /// <summary>Kind 21: 1 = blue (Unstable Aetherial Node), 2 = red (Stable Aetherial Node).</summary>
     public byte? PortalColour { get; init; }
 
-    /// <summary>Kind 21: Eorzea time as minutes since midnight (0 to 1439).</summary>
-    public ushort? EorzeaMinutes { get; init; }
-
     /// <summary>Kind 21 gone record: ms from first to last sighting.</summary>
     public uint? VisibleMs { get; init; }
 }

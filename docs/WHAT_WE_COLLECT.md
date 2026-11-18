@@ -10,7 +10,7 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
   mutation/adaptation, when it appears, dies and respawns, and when it starts fighting.
 - **FATEs, critical engagements, treasure coffers, pots and bunnies:** which one, where, and its progress.
 - **Baldesion Arsenal portals (Hydatos):** when a blue (Unstable) or red (Stable) Aetherial Node appears or goes away on
-  the Hydatos field map: its colour, where it stands, the time, the Eorzea time and the weather. It is a map object, not
+  the Hydatos field map: its colour, where it stands, the time and the weather. Eorzea time is not recorded; it can be worked out from the time. It is a map object, not
   a player, and nothing about you is attached. It is collected so the website can show where the portals open.
 - **Your own drops, EXP chains and kills:** read from game notices (item id and amount, chain number). Player chat is
   never read. Each kill notice says which monster was defeated (the same game ids as above), and each drop and chain

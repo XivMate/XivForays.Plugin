@@ -38,9 +38,6 @@ internal static class EorzeaClock
     public static int EtHour(long unixMs) => (int)(((unixMs / EtHourMs) % 24 + 24) % 24);
 
     /// <summary>Night is ET 18:00 to 06:00 (the exporter's boundary).</summary>
-    /// <summary>Eorzea minutes since midnight (0 to 1439).</summary>
-    public static int EtMinuteOfDay(long unixMs) => (int)(((unixMs * 60 / EtHourMs) % 1440 + 1440) % 1440);
-
     public static bool IsNight(long unixMs) => EtHour(unixMs) is < 6 or >= 18;
 
     /// <summary>The standard weather hash (0 to 99) of the 8 ET hour period holding this time.</summary>

@@ -115,7 +115,6 @@ internal sealed class PortalTracker
         X = entry.X,
         Y = entry.Y,
         Z = entry.Z,
-        EorzeaMinutes = (ushort)EorzeaClock.EtMinuteOfDay(context.ObservedAtMs),
         VisibleMs = present ? null : (uint)Math.Min(uint.MaxValue, Math.Max(0, entry.LastSeenMs - entry.FirstSeenMs))
     };
 }
