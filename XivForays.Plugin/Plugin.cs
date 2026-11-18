@@ -156,6 +156,20 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton<ApiService>();
         services.AddSingleton<PoseCaptureService>();
         services.AddSingleton<PlayerContextSampler>();
+        services.AddSingleton(_ =>
+        {
+            string? path = null;
+            try
+            {
+                path = System.IO.Path.Combine(PluginInterface.GetPluginConfigDirectory(), "light-gains.log");
+            }
+            catch (Exception)
+            {
+                // Local file is optional.
+            }
+
+            return new Core.LightGainLog(path);
+        });
         services.AddSingleton<EnemyTrackingService>();
         services.AddSingleton<EnemyLocationGatherer>();
         services.AddSingleton<ForayService>();

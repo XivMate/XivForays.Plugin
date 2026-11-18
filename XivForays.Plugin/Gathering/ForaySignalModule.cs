@@ -35,6 +35,7 @@ internal sealed partial class ForaySignalModule(
     FateRewardWindow fateRewards,
     SchedulerService scheduler,
     ICommandManager commands,
+    LightGainLog lightLog,
     IPluginLog log) : IModule
 {
     /// <summary>How often an unresolved defeat notice looks for its enemy again.</summary>
@@ -83,6 +84,7 @@ internal sealed partial class ForaySignalModule(
             linker.Clear();
             light.Clear();
             fateWatch.Observe(Guid.Empty, [], 0, 0, 0);
+            ClearGains();
             fateRewards.Clear();
             scheduler.CancelScheduledTask(SignalTick);
             scheduler.CancelScheduledTask(ResolveTick);
@@ -110,9 +112,11 @@ internal sealed partial class ForaySignalModule(
             int? Int(int index) => message.TryGetIntParameter(index, out var value) ? value : null;
             var row = message.LogMessageId;
             var now = Environment.TickCount64;
-            if (KettleRows.IsKettleRow(row))
+            if (LightGainRows.Type(row) is { } gainType)
             {
-                RecordKettleNotice(row, player.Position);
+                RecordGainNotice(row, gainType, NoticeParameters(message));
+                if (KettleRows.IsKettleRow(row))
+                    RecordKettleNotice(row, player.Position);
                 return;
             }
 
@@ -144,7 +148,11 @@ internal sealed partial class ForaySignalModule(
                 if (by == (byte)ObjectCategory.Self)
                     pairing.Structured((int)ObservationKind.SelfDefeat, now);
                 RecordDefeat(by.Value, target == null ? null : LogNotices.EnemyNameId(target.ObjStrId));
+                return;
             }
+
+            if (ForayZones.IsEureka(observations.GetContext().TerritoryId))
+                RecordNotice(row, NoticeParameters(message));
         }
         catch (Exception ex)
         {
@@ -247,6 +255,7 @@ internal sealed partial class ForaySignalModule(
     private void LightTick(Observation context, Vector3 playerPosition)
     {
         var now = context.ObservedAtMs;
+        lastLightReading = null;
         if (!KettleRows.InKettleZone(context.TerritoryId))
         {
             EmitLight(light.Flush(), context);
@@ -256,7 +265,8 @@ internal sealed partial class ForaySignalModule(
         foreach (var fate in fateWatch.Observe(context.VisitId, CurrentFates(context.TerritoryId), now, playerPosition.X,
                      playerPosition.Z))
             light.NoteFate(context.VisitId, context.TerritoryId, fate);
-        light.Value(now, context.VisitId, context.TerritoryId, lightSource.Read(), LightNow(now));
+        lastLightReading = lightSource.Read();
+        light.Value(now, context.VisitId, context.TerritoryId, lastLightReading, LightNow(now));
         EmitLight(light.Tick(now), context);
     }
 
@@ -363,6 +373,9 @@ internal sealed partial class ForaySignalModule(
             {
                 linker.Flush(Emit);
                 EmitLight(light.Flush(), context);
+                GainTick(context, true);
+                gainKills.Clear();
+                gainSamples.Clear();
                 visitId = context.VisitId;
                 treasures.Clear();
                 encounters.Clear();
@@ -381,6 +394,7 @@ internal sealed partial class ForaySignalModule(
             if (ForayZones.HasCriticalEngagements(context.TerritoryId))
                 SampleEncounters(context);
             LightTick(context, player.Position);
+            GainTick(context, false);
             // Kind 19 player context: on change (at most every 5 s) or every 60 s.
             playerContext.Tick(context, observations.Record);
         }

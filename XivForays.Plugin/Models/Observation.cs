@@ -42,7 +42,13 @@ internal enum ObservationKind
     KettleLight = 20,
 
     /// <summary>Baldesion Arsenal portal (Hydatos field map): an Unstable (blue) or Stable (red) Aetherial Node entering the object table (state 1) or leaving it (state 0). See docs/WHAT_WE_COLLECT.md.</summary>
-    Portal = 21
+    Portal = 21,
+
+    /// <summary>One Eureka light gain (Pagos, Pyros): the light notice row, the kettle value before and after, the linked kill, chain, party, EXP buffs and EXP. See docs/CAPTURE_SPEC.md.</summary>
+    LightGain = 22,
+
+    /// <summary>Discovery net (Eureka zones): a LogMessage row id with its integer parameters. Numbers only, throttled and deduped.</summary>
+    Notice = 23
 }
 
 /// <summary>FATE result on FateEnded: from the end state (Ended/Failed), else from the last progress (100 = success).</summary>
@@ -255,4 +261,59 @@ internal sealed record Observation
 
     /// <summary>Kind 21 gone record: ms from first to last sighting.</summary>
     public uint? VisibleMs { get; init; }
+
+    // Light gain (kind 22) and notice net (kind 23). Row ids and numbers only: the notice text is never read. Kind 22 also
+    // uses noticeRow, gameId, isMutated, isAdapted, form, defeatBy, defeatTrackId (the linked kill), chainNumber, chainAgeMs
+    // and situation (the player context at the notice: chain timer, party rows, level, EXP buff statuses, EXP).
+
+    /// <summary>Kind 22: 1 feeble, 2 gentle, 3 bright, 4 brilliant, 5 blinding, 6 newborn star, 7 exploding star, 8 kettle full, 9 forge converted.</summary>
+    public byte? GainType { get; init; }
+
+    /// <summary>Kinds 22, 23: the LogMessage integer parameters (at most 6), numbers only.</summary>
+    public int[]? NoticeParams { get; init; }
+
+    /// <summary>Kind 22: ms from the linked kill to the notice (0 to 3000); absent when no kill came in the 3 s before.</summary>
+    public uint? GainKillGapMs { get; init; }
+
+    /// <summary>Kind 22: kettle yield counter, from the last sample at or before the kill (else the notice).</summary>
+    public int? GainYieldBefore { get; init; }
+
+    /// <summary>Kind 22: kettle light bar, same sample.</summary>
+    public int? GainBarBefore { get; init; }
+
+    /// <summary>Kind 22: kettle yield read about 1 s after the notice. Absent when the memory read is off.</summary>
+    public int? GainYieldAfter { get; init; }
+
+    /// <summary>Kind 22: kettle light bar read about 1 s after the notice.</summary>
+    public int? GainBarAfter { get; init; }
+
+    /// <summary>Kind 22: elemental level before the kill or notice.</summary>
+    public uint? GainElementalLevelBefore { get; init; }
+
+    /// <summary>Kind 22: effective (synced) elemental level before.</summary>
+    public uint? GainEffectiveLevelBefore { get; init; }
+
+    /// <summary>Kind 22: elemental level synced flag before.</summary>
+    public bool? GainSyncedBefore { get; init; }
+
+    /// <summary>Kind 22: Eureka EXP before.</summary>
+    public uint? GainExperienceBefore { get; init; }
+
+    /// <summary>Kind 22: Eureka EXP needed for the level before.</summary>
+    public uint? GainExperienceNeededBefore { get; init; }
+
+    /// <summary>Kind 22: elemental level about 1 s after the notice.</summary>
+    public uint? GainElementalLevelAfter { get; init; }
+
+    /// <summary>Kind 22: effective elemental level after.</summary>
+    public uint? GainEffectiveLevelAfter { get; init; }
+
+    /// <summary>Kind 22: elemental level synced flag after.</summary>
+    public bool? GainSyncedAfter { get; init; }
+
+    /// <summary>Kind 22: Eureka EXP after.</summary>
+    public uint? GainExperienceAfter { get; init; }
+
+    /// <summary>Kind 22: Eureka EXP needed after.</summary>
+    public uint? GainExperienceNeededAfter { get; init; }
 }

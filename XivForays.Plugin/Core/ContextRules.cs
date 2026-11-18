@@ -103,7 +103,9 @@ internal static class ContextRules
     private static readonly string[] AllowedNames =
     [
         "Sprint", "Sneak", "Stealth", "Hide", "Hidden", "Invisible", "Weakness", "Brink of Death", "Transcendent",
-        "Raise", "Reraise", "Reraiser", "Well Fed", "Elemental Attunement", "Magia Aether"
+        "Raise", "Reraise", "Reraiser", "Well Fed", "Elemental Attunement", "Magia Aether",
+        // Eureka EXP buffs (status ids 1732, 1461, 1587): they change the printed EXP bonus.
+        "Elemental EXP Up", "Elemental Blessing: EXP", "Elemental Harmony"
     ];
 
     /// <summary>
