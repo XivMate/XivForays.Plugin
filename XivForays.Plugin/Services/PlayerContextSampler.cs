@@ -107,6 +107,9 @@ public sealed class PlayerContextSampler(IObjectTable objectTable, IPartyList pa
         log.Information(LastLine);
     }
 
+    /// <summary>A fresh read of the player context now (light gain records), without recording it.</summary>
+    internal PlayerContext? Snapshot(Observation context) => Read(context);
+
     private unsafe PlayerContext? Read(Observation context)
     {
         var local = objectTable.LocalPlayer;

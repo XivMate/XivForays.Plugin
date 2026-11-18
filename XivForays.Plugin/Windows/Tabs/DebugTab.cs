@@ -13,7 +13,8 @@ internal class DebugTab(
     FateModule fateModule,
     EnemyTrackingService enemyTrackingService,
     PoseCaptureService poseCapture,
-    PlayerContextSampler playerContext) : ITab
+    PlayerContextSampler playerContext,
+    Core.LightGainLog lightGains) : ITab
 {
     private bool Debug;
 
@@ -42,6 +43,10 @@ internal class DebugTab(
         }
 
         RenderPoseTable();
+
+        ImGui.TextUnformatted("Last light gains (newest first): " + lightGains.Source);
+        foreach (var line in lightGains.Recent)
+            ImGui.TextUnformatted(line);
 
         if (Debug)
         {

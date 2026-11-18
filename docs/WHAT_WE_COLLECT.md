@@ -19,7 +19,12 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
   "nothing dropped" can be told apart from "not recording".
 - **Your own foray state:** your position every 30 seconds, job and level, elemental/knowledge level, the magia board,
   the chain timer, whether you are dead or mounted, and a short list of foray buffs (sprint, sneak, logos/lost/phantom
-  actions, food, raise/weakness).
+  actions, food, raise/weakness) and, from the next release, your Eureka EXP buffs (Elemental EXP Up,
+  Elemental Blessing, Elemental Harmony).
+- **Eureka light gains (Pagos, Pyros):** each time the kettle gets light, the kind of light message, the kettle's
+  value before and after (read from game memory, read only), the kill that caused it, your chain, your party as
+  numbers, your EXP buffs and your EXP before and after. Plus, in Eureka zones, a small throttled list of other game
+  message numbers (ids and numbers only, never text).
 - **Your group, as numbers only:** how many are in your party, and each member's job, level and role, plus their
   foray level as the party list shows it: in Eureka their elemental level, the level they are synced to and whether
   they are synced; in Bozja and Zadnor their resistance rank; in the Occult Crescent their knowledge level and the

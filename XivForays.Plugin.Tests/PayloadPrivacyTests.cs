@@ -141,6 +141,9 @@ public class PayloadPrivacyTests
         Assert.Equal(17, (int)ObservationKind.EnemyIdleTrack);
         Assert.Equal(18, (int)ObservationKind.EnemyAggro);
         Assert.Equal(19, (int)ObservationKind.PlayerContext);
-        Assert.Equal(Enumerable.Range(1, 19), Enum.GetValues<ObservationKind>().Select(k => (int)k));
+        Assert.Equal(22, (int)ObservationKind.LightGain);
+        Assert.Equal(23, (int)ObservationKind.Notice);
+        // 20 (kettle light) and 21 (portals) are taken on other branches.
+        Assert.Equal(Enumerable.Range(1, 19).Concat([22, 23]), Enum.GetValues<ObservationKind>().Select(k => (int)k));
     }
 }

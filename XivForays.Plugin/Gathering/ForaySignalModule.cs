@@ -34,6 +34,7 @@ internal sealed partial class ForaySignalModule(
     EnemyTrackingService enemies,
     FateRewardWindow fateRewards,
     SchedulerService scheduler,
+    LightGainLog lightLog,
     IPluginLog log) : IModule
 {
     /// <summary>How often an unresolved defeat notice looks for its enemy again.</summary>
@@ -72,6 +73,7 @@ internal sealed partial class ForaySignalModule(
             lootListening = false;
             pairing.Clear();
             linker.Clear();
+            ClearGains();
             fateRewards.Clear();
             scheduler.CancelScheduledTask(SignalTick);
             scheduler.CancelScheduledTask(ResolveTick);
@@ -99,6 +101,12 @@ internal sealed partial class ForaySignalModule(
             int? Int(int index) => message.TryGetIntParameter(index, out var value) ? value : null;
             var row = message.LogMessageId;
             var now = Environment.TickCount64;
+            if (LightGainRows.Type(row) is { } gainType)
+            {
+                RecordGainNotice(row, gainType, NoticeParameters(message));
+                return;
+            }
+
             if (LogNotices.Chain(row, Int) is { } chain)
             {
                 pairing.Structured((int)ObservationKind.Chain, now);
@@ -127,7 +135,11 @@ internal sealed partial class ForaySignalModule(
                 if (by == (byte)ObjectCategory.Self)
                     pairing.Structured((int)ObservationKind.SelfDefeat, now);
                 RecordDefeat(by.Value, target == null ? null : LogNotices.EnemyNameId(target.ObjStrId));
+                return;
             }
+
+            if (ForayZones.IsEureka(observations.GetContext().TerritoryId))
+                RecordNotice(row, NoticeParameters(message));
         }
         catch (Exception ex)
         {
@@ -195,8 +207,10 @@ internal sealed partial class ForaySignalModule(
     /// <summary>Records only while the record's content (Eureka, Bozja, Occult Crescent) is ticked.</summary>
     private void Emit(Observation observation)
     {
-        if (forayService.IsContentEnabled(observation.TerritoryId))
-            observations.Record(observation);
+        if (!forayService.IsContentEnabled(observation.TerritoryId))
+            return;
+        NoteGainKill(observation);
+        observations.Record(observation);
     }
 
     private void ResolveTick()
@@ -274,6 +288,9 @@ internal sealed partial class ForaySignalModule(
             if (visitId != context.VisitId)
             {
                 linker.Flush(Emit);
+                GainTick(context, true);
+                gainKills.Clear();
+                gainSamples.Clear();
                 visitId = context.VisitId;
                 treasures.Clear();
                 encounters.Clear();
@@ -291,6 +308,7 @@ internal sealed partial class ForaySignalModule(
             SampleTreasure(context);
             if (ForayZones.HasCriticalEngagements(context.TerritoryId))
                 SampleEncounters(context);
+            GainTick(context, false);
             // Kind 19 player context: on change (at most every 5 s) or every 60 s.
             playerContext.Tick(context, observations.Record);
         }
