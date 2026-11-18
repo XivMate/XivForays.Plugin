@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Lumina.Excel.Sheets;
 using FFXIVClientStructs.FFXIV.Client.Game.Event;
 using FFXIVClientStructs.FFXIV.Client.Game.InstanceContent;
 using XivMate.DataGathering.Forays.Dalamud.Core;
@@ -15,7 +16,12 @@ namespace XivMate.DataGathering.Forays.Dalamud.Gathering;
 internal sealed partial class ForaySignalModule
 {
     /// <summary>A light notice waits this long so the kettle value and EXP have updated and the kill is resolved.</summary>
-    private const long GainHoldMs = 1000;
+    private const long GainHoldMs = 1800;
+
+    /// <summary>A repeat of the same light row and parameters this close to a pending one is the same notice.</summary>
+    private const long GainDedupeMs = 400;
+
+    private readonly ChainNotices chainNotices = new();
 
     private readonly GainKills gainKills = new();
     private readonly GainSamples gainSamples = new();
@@ -55,14 +61,25 @@ internal sealed partial class ForaySignalModule
         pendingGains.Clear();
         gainKills.Clear();
         gainSamples.Clear();
+        chainNotices.Clear();
         noticeNet.Clear();
+    }
+
+    /// <summary>An "EXP chain #n" notice: kept by time so a light gain can take the chain number of its own kill.</summary>
+    private void NoteChainNotice(uint number, long atMs) => chainNotices.Add(number, atMs);
+
+    /// <summary>A defeat notice (own or party): remembered at once, before the enemy is resolved, with the enemy name id.</summary>
+    private void NoteDefeatNotice(Observation defeat, uint? nameId)
+    {
+        if (ForayZones.IsEureka(defeat.TerritoryId))
+            gainKills.Upsert(GainKill.From(defeat, nameId));
     }
 
     /// <summary>A kill record that has been resolved and is being recorded: remembered for the 3 s light link.</summary>
     private void NoteGainKill(Observation observation)
     {
         if (observation.Kind == ObservationKind.SelfDefeat && ForayZones.IsEureka(observation.TerritoryId))
-            gainKills.Add(GainKill.From(observation));
+            gainKills.Upsert(GainKill.From(observation));
     }
 
     /// <summary>Kind 23: an unmatched LogMessage row with its integer parameters (numbers only), throttled and deduped.</summary>
@@ -83,9 +100,10 @@ internal sealed partial class ForaySignalModule
         var context = observations.GetContext();
         if (!LightGainRows.InKettleZone(context.TerritoryId))
             return;
+        if (pendingGains.Any(p => p.Row == row && p.Params.AsSpan().SequenceEqual(parameters) &&
+                                  Math.Abs(context.ObservedAtMs - p.NoticeMs) <= GainDedupeMs))
+            return;
         var snapshot = playerContext.Snapshot(context);
-        var chain = playerContext.ChainAt(context.ObservedAtMs);
-        context = context with { ChainNumber = chain.Number, ChainAgeMs = chain.AgeMs };
         pendingGains.Add(new PendingGain(context.ObservedAtMs, context.ObservedAtMs + GainHoldMs, context, snapshot, row, type, parameters));
     }
 
@@ -121,7 +139,7 @@ internal sealed partial class ForaySignalModule
             var observation = BuildGain(pending, after);
             Emit(observation);
             var line = LightGainLog.Line(observation);
-            lightLog.Add(line);
+            lightLog.Add(line, MakeRow(observation));
             log.Information(line);
         }
     }
@@ -171,7 +189,45 @@ internal sealed partial class ForaySignalModule
     private Observation BuildGain(PendingGain pending, GainSample? after)
     {
         var kill = gainKills.Find(pending.NoticeMs);
+        long? killGap = kill is { } kf ? kf.GapMs : null;
+        if (kill == null && gainKills.FindAfter(pending.NoticeMs, 1800) is { } later)
+        {
+            kill = later;
+            killGap = -(long)later.GapMs;
+        }
+
         var before = gainSamples.Before(kill?.Kill.AtMs ?? pending.NoticeMs);
-        return BuildGain(pending, after, kill, before);
+        var record = BuildGain(pending, after, kill, before);
+        var chain = chainNotices.Find(kill?.Kill.AtMs ?? pending.NoticeMs, pending.NoticeMs);
+        lastGainExtra = (killGap, chain?.GapMs, kill?.Kill.NameId, kill?.Kill.Level);
+        return record with
+        {
+            ChainNumber = chain?.Number,
+            ChainAgeMs = chain is { } c ? (uint)Math.Abs(c.GapMs) : null
+        };
+    }
+
+    private (long? KillGap, long? ChainGap, uint? NameId, byte? Level) lastGainExtra;
+
+    private string StatusName(int id) =>
+        data.GetExcelSheet<Status>().TryGetRow((uint)id, out var row) ? row.Name.ExtractText() : "";
+
+    /// <summary>The Debug table and CSV row of a finished gain. Names are enemy and status names only.</summary>
+    private LightRow MakeRow(Observation o)
+    {
+        var (killGap, chainGap, nameId, level) = lastGainExtra;
+        var enemy = nameId is { } n && data.GetExcelSheet<BNpcName>().TryGetRow(n, out var row) ? row.Singular.ExtractText() : "";
+        if (enemy == "" && o.GameId != null)
+            enemy = "id " + o.GameId;
+        var ids = o.Situation is { } s ? s.Statuses.Select(x => x[0]).ToArray() : [];
+        var names = ids.Select(StatusName).Where(x => x is "Elemental EXP Up" or "Elemental Blessing: EXP" or "Elemental Harmony").ToArray();
+        var amount = KettleLightChain.Delta(
+            o.GainBarBefore is { } bb ? new KettleReading(o.GainYieldBefore ?? 0, bb) : null,
+            o.GainBarAfter is { } ba ? new KettleReading(o.GainYieldAfter ?? 0, ba) : null, KettleLightChain.BarCap);
+        var wrapped = o.GainYieldBefore != null && o.GainYieldAfter != null && o.GainYieldBefore != o.GainYieldAfter;
+        return new LightRow(DateTimeOffset.FromUnixTimeMilliseconds(o.ObservedAtMs), o.ChainNumber, chainGap, o.GainType ?? 0, amount,
+            wrapped && amount == null, enemy, o.IsMutated == true, o.IsAdapted == true, o.GameId, level, o.Situation?.GroupSize ?? 0,
+            string.Join(" + ", names), string.Join(" ", ids), o.GainBarBefore, o.GainBarAfter, o.GainYieldBefore, o.GainYieldAfter,
+            o.GainExperienceBefore, o.GainExperienceAfter, o.GainExperienceNeededAfter, o.GainElementalLevelAfter, killGap, o.NoticeRow ?? 0);
     }
 }

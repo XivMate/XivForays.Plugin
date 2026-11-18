@@ -161,6 +161,7 @@ internal sealed partial class ForaySignalModule(
     private void RecordDefeat(byte by, uint? enemyNameId)
     {
         var defeat = observations.GetContext() with { Kind = ObservationKind.SelfDefeat, DefeatBy = by };
+        NoteDefeatNotice(defeat, enemyNameId);
         linker.Defeat(defeat, enemyNameId, enemies.IdentifyDefeat, Emit);
     }
 
