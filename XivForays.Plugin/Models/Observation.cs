@@ -196,14 +196,23 @@ internal sealed record Observation
     // enemyCombatLevel, enemyElementalLevel, form, isMutated, isAdapted, defeatBy, defeatTrackId, chainNumber and
     // chainAgeMs (all of the linked kill), fateRewardId (the linked FATE), and noticeRow.
 
-    /// <summary>Kind 20: the kettle value before the change (raw game value, unit unverified); absent when it cannot be read.</summary>
-    public uint? LightBefore { get; init; }
+    /// <summary>Kind 20: the kettle yield counter (whole kettles) before the change; absent when it cannot be read.</summary>
+    public int? LightYieldBefore { get; init; }
 
-    /// <summary>Kind 20: the kettle value after the change.</summary>
-    public uint? LightAfter { get; init; }
+    /// <summary>Kind 20: the kettle light bar before the change (last 1 s sample before the notice).</summary>
+    public int? LightBarBefore { get; init; }
 
-    /// <summary>Kind 20: after minus before.</summary>
+    /// <summary>Kind 20: the yield counter after the change.</summary>
+    public int? LightYieldAfter { get; init; }
+
+    /// <summary>Kind 20: the light bar after the change.</summary>
+    public int? LightBarAfter { get; init; }
+
+    /// <summary>Kind 20: light gained, (yieldAfter - yieldBefore) * cap + barAfter - barBefore; negative at the forge. Absent when the yield changed and the cap is unknown.</summary>
     public int? LightDelta { get; init; }
+
+    /// <summary>Kind 20: bar points per yield (the rollover size); absent while unknown.</summary>
+    public int? LightCap { get; init; }
 
     /// <summary>Kind 20: the grade of the notice row: 1 feeble, 2 gentle, 3 bright, 4 brilliant, 5 blinding, 6 newborn star, 7 exploding star. Absent without a grade notice.</summary>
     public byte? LightTier { get; init; }
