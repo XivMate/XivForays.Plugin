@@ -34,6 +34,7 @@ internal sealed partial class ForaySignalModule(
     EnemyTrackingService enemies,
     FateRewardWindow fateRewards,
     SchedulerService scheduler,
+    ICommandManager commands,
     IPluginLog log) : IModule
 {
     /// <summary>How often an unresolved defeat notice looks for its enemy again.</summary>
@@ -43,7 +44,11 @@ internal sealed partial class ForaySignalModule(
     private readonly DropLinker linker = new();
     private readonly LightTracker light = new();
     private readonly FateCompletionWatch fateWatch = new();
-    private readonly KettleLightValueSource lightSource = new(log, () => data.GameData.Repositories.TryGetValue("ffxiv", out var repo) ? repo.Version : null);
+    private readonly KettleLightValueSource lightSource = new(log, () => data.GameData.Repositories.TryGetValue("ffxiv", out var repo) ? repo.Version : null, EurekaDirectorAddress);
+#if DEV_SCANNER
+    // Developer builds only: one Dalamud log line per kettle record and /xfkettle (local chat echo of the last 5).
+    private Dev.KettleDevLog? kettleDev = new(commands, chatGui, log);
+#endif
     private readonly Lazy<long?> gameVersion = new(() =>
         LogNotices.GameVersionNumber(data.GameData.Repositories.TryGetValue("ffxiv", out var repo) ? repo.Version : null));
     private Dictionary<ulong, (uint BaseId, Vector3 Position)> treasures = new();
@@ -258,7 +263,25 @@ internal sealed partial class ForaySignalModule(
     private void EmitLight(List<LightEvent> events, Observation context)
     {
         foreach (var evt in events)
+        {
+#if DEV_SCANNER
+            kettleDev?.Record(evt);
+#endif
             Emit(evt.ToObservation(context));
+        }
+    }
+
+    /// <summary>
+    /// The active content director's address when it is the Eureka director, else 0. Read each sample (never cached). Uses
+    /// the FFXIVClientStructs static instance and its type field only; nothing is called that changes game state.
+    /// </summary>
+    private static unsafe ulong EurekaDirectorAddress()
+    {
+        var events = EventFramework.Instance();
+        var director = events == null ? null : events->DirectorModule.ActiveContentDirector;
+        if (director == null)
+            return 0;
+        return ((PublicContentDirector*)director)->Type == PublicContentDirectorType.Eureka ? (ulong)director : 0;
     }
 
     private void ResolveTick()
@@ -534,5 +557,12 @@ internal sealed partial class ForaySignalModule(
 
 
 
-    public void Dispose() => LoadConfig(new Configuration.Configuration());
+    public void Dispose()
+    {
+        LoadConfig(new Configuration.Configuration());
+#if DEV_SCANNER
+        kettleDev?.Dispose();
+        kettleDev = null;
+#endif
+    }
 }

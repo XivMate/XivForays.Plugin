@@ -9,91 +9,88 @@ internal interface IProcessMemory
     bool TryReadInt32(ulong address, out int value);
 }
 
+/// <summary>The kettle as the game shows it: the "yield" counter (whole kettles filled) and the light bar.</summary>
+internal readonly record struct KettleReading(int Yield, int Bar);
+
+internal enum KettleReadStatus : byte
+{
+    /// <summary>A plausible reading was made.</summary>
+    Ok = 0,
+
+    /// <summary>The chain did not resolve (no Eureka director, null or unreadable hop). Transient; try again next sample.</summary>
+    Unreadable = 1,
+
+    /// <summary>The chain resolved but the numbers are impossible. The source switches itself off for the session.</summary>
+    OutOfRange = 2
+}
+
 /// <summary>
-/// The pointer chain a Cheat Engine table shared in the Eurekan Explorers Discord uses for the kettle light bar:
-/// static pointer at module + <see cref="BaseRva"/>, then offsets 0x38, 0x10, 0xC8, 0x20 (each one a pointer read),
-/// then a 4 byte integer at +0x134. Cheat Engine lists the offsets last applied first (134, 20, C8, 10, 38).
-/// Every hop is null-checked and range-checked, and every read can fail without side effects.
+/// Where the kettle numbers live (read-only structs scan, 2026-11-18): the active content director, when it is the Eureka
+/// director, holds a pointer at +0x440 to a per-instance block B. The yield is an int32 at B+0x78 and the light bar an
+/// int32 at B+0x1D8. B is freed and rebuilt per instance, so the pointer is read again at every sample and B is never kept.
+/// Every hop is null-checked and range-checked and every read can fail without side effects.
 /// </summary>
 internal static class KettleLightChain
 {
-    public const ulong BaseRva = 0x19053B8;
-    public static readonly uint[] PointerOffsets = [0x38, 0x10, 0xC8, 0x20];
-    public const uint ValueOffset = 0x134;
+    public const ulong BlockPointerOffset = 0x440;
+    public const ulong YieldOffset = 0x78;
+    public const ulong BarOffset = 0x1D8;
 
-    /// <summary>Largest value accepted as plausible. The unit is not confirmed (the table's last value was 61).</summary>
-    public const int MaxPlausible = 100_000;
+    /// <summary>Sanity limits: a bar outside 0 to 120 or a yield outside 0 to 999 means the layout is not what was checked.</summary>
+    public const int MaxBar = 120;
+    public const int MaxYield = 999;
+
+    /// <summary>
+    /// How many bar points make one yield (the rollover size). Not known yet, so deltas across a yield change are not
+    /// computed; the raw values are recorded so they can be worked out later.
+    /// </summary>
+    public static readonly int? BarCap = null;
 
     /// <summary>User-mode pointer sanity: not null, not in the first 64 KiB, below the 47 bit limit.</summary>
     public static bool PlausiblePointer(ulong p) => p >= 0x10000 && p < 0x0000_8000_0000_0000UL;
 
-    /// <summary>The kettle value, or null when any hop fails or the value is out of range.</summary>
-    public static uint? Read(IProcessMemory memory, ulong moduleBase)
-    {
-        if (!PlausiblePointer(moduleBase))
-            return null;
-        if (!memory.TryReadPointer(moduleBase + BaseRva, out var p) || !PlausiblePointer(p))
-            return null;
-        foreach (var offset in PointerOffsets)
-        {
-            if (!memory.TryReadPointer(p + offset, out p) || !PlausiblePointer(p))
-                return null;
-        }
+    public static bool Plausible(KettleReading r) => r.Bar is >= 0 and <= MaxBar && r.Yield is >= 0 and <= MaxYield;
 
-        if (!memory.TryReadInt32(p + ValueOffset, out var value) || value is < 0 or > MaxPlausible)
+    /// <summary>Reads yield and bar from the Eureka director at <paramref name="director"/> (0 when there is none).</summary>
+    public static KettleReadStatus Try(IProcessMemory memory, ulong director, out KettleReading reading)
+    {
+        reading = default;
+        if (!PlausiblePointer(director))
+            return KettleReadStatus.Unreadable;
+        if (!memory.TryReadPointer(director + BlockPointerOffset, out var block) || !PlausiblePointer(block))
+            return KettleReadStatus.Unreadable;
+        if (!memory.TryReadInt32(block + YieldOffset, out var yield) || !memory.TryReadInt32(block + BarOffset, out var bar))
+            return KettleReadStatus.Unreadable;
+        reading = new KettleReading(yield, bar);
+        return Plausible(reading) ? KettleReadStatus.Ok : KettleReadStatus.OutOfRange;
+    }
+
+    /// <summary>
+    /// Light gained between two readings: (yieldAfter - yieldBefore) * cap + barAfter - barBefore. With the yield unchanged
+    /// no cap is needed. With a yield change and an unknown cap the answer is null (the raw values still say it).
+    /// </summary>
+    public static int? Delta(KettleReading? before, KettleReading? after, int? cap)
+    {
+        if (before is not { } b || after is not { } a)
             return null;
-        return (uint)value;
+        if (a.Yield == b.Yield)
+            return a.Bar - b.Bar;
+        return cap is { } c ? (a.Yield - b.Yield) * c + a.Bar - b.Bar : null;
     }
 }
 
 /// <summary>
-/// Decides whether the raw RVA may be used on this game build. It may only when the game version is one the chain was
-/// checked on and the RVA lies in a writable, non-executable section of the loaded exe (a static pointer cannot live in
-/// code). Otherwise the source switches itself off. The reason is returned so it can be logged once.
+/// Decides whether the offsets may be used on this game build. They were checked on one build only; on any other the source
+/// stays off and the kind 20 records are notice-only.
 /// </summary>
 internal static class KettleLightGuard
 {
-    /// <summary>Game versions the chain is allowed on. Add a version only after step 11 of docs/KETTLE_LIGHT.md passes on it.</summary>
+    /// <summary>Game versions the offsets are allowed on. Add a version only after step 11 of docs/KETTLE_LIGHT.md passes on it.</summary>
     public static readonly string[] AllowedVersions = ["2026.11.03.0000.0000"];
 
-    public const uint SectionExecute = 0x20000000;
-    public const uint SectionWrite = 0x80000000;
-
-    /// <summary>Null when the chain may be read, else the reason it is off.</summary>
-    public static string? Reason(string? gameVersion, uint? rvaSectionCharacteristics)
-    {
-        if (gameVersion is null || Array.IndexOf(AllowedVersions, gameVersion) < 0)
-            return $"game version {gameVersion ?? "unknown"} is not one the kettle value address was checked on";
-        if (rvaSectionCharacteristics is null)
-            return "the kettle value address is outside every section of the game exe";
-        if ((rvaSectionCharacteristics & SectionExecute) != 0 || (rvaSectionCharacteristics & SectionWrite) == 0)
-            return "the kettle value address is in code or read-only data on this build (a static pointer lives in writable data), so it was not read";
-        return null;
-    }
-
-    /// <summary>The PE section characteristics covering an RVA, read from the loaded exe's headers; null if none covers it.</summary>
-    public static uint? SectionCharacteristics(IProcessMemory memory, ulong moduleBase, ulong rva)
-    {
-        if (!memory.TryReadInt32(moduleBase + 0x3C, out var peOffset) || peOffset is < 0x40 or > 0x1000)
-            return null;
-        var pe = moduleBase + (ulong)peOffset;
-        if (!memory.TryReadInt32(pe, out var signature) || signature != 0x4550)
-            return null;
-        if (!memory.TryReadInt32(pe + 4, out var machineAndCount) || !memory.TryReadInt32(pe + 20, out var optAndFlags))
-            return null;
-        var sections = (machineAndCount >> 16) & 0xFFFF;
-        var optionalSize = optAndFlags & 0xFFFF;
-        var first = pe + 24 + (ulong)optionalSize;
-        for (var i = 0; i < sections && i < 96; i++)
-        {
-            var o = first + (ulong)(i * 40);
-            if (!memory.TryReadInt32(o + 8, out var virtualSize) || !memory.TryReadInt32(o + 12, out var virtualAddress)
-                || !memory.TryReadInt32(o + 36, out var characteristics))
-                return null;
-            if (rva >= (ulong)(uint)virtualAddress && rva < (ulong)(uint)virtualAddress + (uint)virtualSize)
-                return (uint)characteristics;
-        }
-
-        return null;
-    }
+    /// <summary>Null when the offsets may be read, else the reason they are off.</summary>
+    public static string? Reason(string? gameVersion) =>
+        gameVersion is null || Array.IndexOf(AllowedVersions, gameVersion) < 0
+            ? $"game version {gameVersion ?? "unknown"} is not one the kettle offsets were checked on"
+            : null;
 }

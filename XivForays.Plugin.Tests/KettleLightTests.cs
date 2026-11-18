@@ -14,6 +14,8 @@ public class KettleLightTests
     private static readonly Guid TrackB = Guid.Parse("0f8e0000-0000-0000-0000-00000000000b");
     private const long T0 = 1793940205000;
     private const uint Pagos = 763;
+    private static KettleReading R(int bar) => new(5, bar);
+
     private static readonly LightSnapshot Snap = new(20, 4000, 5);
 
     private static LightKill Kill(long at, Guid? track = null, byte form = 0) =>
@@ -110,13 +112,13 @@ public class KettleLightTests
     public void ValueChangeAndNoticeMergeIntoOneEventWithBeforeAfterAndDelta()
     {
         var t = new LightTracker();
-        t.Value(T0 - 5000, Visit, Pagos, 40, Snap);
+        t.Value(T0 - 5000, Visit, Pagos, R(40), Snap);
         t.NoteKill(Visit, Pagos, Kill(T0, TrackA));
         t.Notice(T0 + 200, Visit, Pagos, 9021, Snap);
-        t.Value(T0 + 300, Visit, Pagos, 52, Snap);
+        t.Value(T0 + 300, Visit, Pagos, R(52), Snap);
         var e = Assert.Single(t.Tick(T0 + 5000));
-        Assert.Equal<uint?>(40, e.Before);
-        Assert.Equal<uint?>(52, e.After);
+        Assert.Equal<KettleReading?>(R(40), e.Before);
+        Assert.Equal<KettleReading?>(R(52), e.After);
         Assert.Equal<int?>(12, e.Delta);
         Assert.Equal<byte>(3, e.Source);
         Assert.Equal<byte?>(2, e.Tier);
@@ -126,8 +128,8 @@ public class KettleLightTests
     public void ValueChangeFirstThenNoticeAlsoMerges()
     {
         var t = new LightTracker();
-        t.Value(T0 - 1000, Visit, Pagos, 10, Snap);
-        t.Value(T0, Visit, Pagos, 15, Snap);
+        t.Value(T0 - 1000, Visit, Pagos, R(10), Snap);
+        t.Value(T0, Visit, Pagos, R(15), Snap);
         t.Notice(T0 + 400, Visit, Pagos, 9022, Snap);
         var e = Assert.Single(t.Tick(T0 + 5000));
         Assert.Equal<int?>(5, e.Delta);
@@ -138,11 +140,11 @@ public class KettleLightTests
     public void ValueChangeWithoutANoticeIsAnEventOfItsOwn_AndTheFirstValueIsOnlyABaseline()
     {
         var t = new LightTracker();
-        t.Value(T0, Visit, Pagos, 7, Snap);
+        t.Value(T0, Visit, Pagos, R(7), Snap);
         Assert.Equal(0, t.PendingCount);
-        t.Value(T0 + 1000, Visit, Pagos, 7, Snap);
+        t.Value(T0 + 1000, Visit, Pagos, R(7), Snap);
         Assert.Equal(0, t.PendingCount);
-        t.Value(T0 + 2000, Visit, Pagos, 9, Snap);
+        t.Value(T0 + 2000, Visit, Pagos, R(9), Snap);
         var e = Assert.Single(t.Tick(T0 + 9000));
         Assert.Null(e.Row);
         Assert.Equal<byte>(2, e.Source);
@@ -176,23 +178,47 @@ public class KettleLightTests
     public void ForgeKeepsTheValueBeforeWhenItIsReadable()
     {
         var t = new LightTracker();
-        t.Value(T0, Visit, Pagos, 80, Snap);
+        t.Value(T0, Visit, Pagos, R(80), Snap);
         t.Notice(T0 + 3000, Visit, Pagos, KettleRows.ForgeConverted, Snap);
-        t.Value(T0 + 3100, Visit, Pagos, 0, Snap);
+        t.Value(T0 + 3100, Visit, Pagos, R(0), Snap);
         var e = Assert.Single(t.Tick(T0 + 9000));
         Assert.True(e.Forge);
-        Assert.Equal<uint?>(80, e.Before);
-        Assert.Equal<uint?>(0, e.After);
+        Assert.Equal<KettleReading?>(R(80), e.Before);
+        Assert.Equal<KettleReading?>(R(0), e.After);
         Assert.Equal<int?>(-80, e.Delta);
+    }
+
+    [Fact]
+    public void ForgeDropWithoutANoticeIsMarkedAsConversion()
+    {
+        var t = new LightTracker();
+        t.Value(T0, Visit, Pagos, new KettleReading(5, 90), Snap);
+        t.Value(T0 + 1000, Visit, Pagos, new KettleReading(4, 3), Snap);
+        var e = Assert.Single(t.Tick(T0 + 9000));
+        Assert.True(e.Forge);
+        Assert.Null(e.Row);
+        Assert.Null(e.Delta); // yield changed and the cap is unknown
+    }
+
+    [Fact]
+    public void NoticeWithNoChangeAfterItTakesTheLatestSampleAsAfter()
+    {
+        var t = new LightTracker();
+        t.Value(T0 - 1000, Visit, Pagos, R(60), Snap);
+        t.Notice(T0, Visit, Pagos, KettleRows.Full, Snap);
+        var e = Assert.Single(t.Tick(T0 + 5000));
+        Assert.Equal<KettleReading?>(R(60), e.Before);
+        Assert.Equal<KettleReading?>(R(60), e.After);
+        Assert.Equal<int?>(0, e.Delta);
     }
 
     [Fact]
     public void AVisitChangeForgetsKillsAndTheBaseline()
     {
         var t = new LightTracker();
-        t.Value(T0, Visit, Pagos, 5, Snap);
+        t.Value(T0, Visit, Pagos, R(5), Snap);
         t.NoteKill(Visit, Pagos, Kill(T0, TrackA));
-        t.Value(T0 + 100, Other, Pagos, 99, Snap);
+        t.Value(T0 + 100, Other, Pagos, R(99), Snap);
         Assert.Equal(0, t.PendingCount);
         t.Notice(T0 + 200, Other, Pagos, 9020, Snap);
         var e = Assert.Single(t.Tick(T0 + 5000));
@@ -227,7 +253,7 @@ public class KettleLightTests
     {
         var kill = new LightKill(T0, TrackA, 7213, 62, 35, 1, 2, 12, 800, null);
         var link = LightLinker.Link(T0 + 700, [kill], []);
-        var e = new LightEvent(T0 + 700, Visit, Pagos, 9022, 3, false, false, 40, 52, Snap, link);
+        var e = new LightEvent(T0 + 700, Visit, Pagos, 9022, 3, false, false, R(40), R(52), Snap, link);
         var o = e.ToObservation(new Observation { MapId = 415, WeatherId = 7 });
         Assert.Equal(ObservationKind.KettleLight, o.Kind);
         Assert.Equal(20, (int)o.Kind);
@@ -244,7 +270,12 @@ public class KettleLightTests
         var root = doc.RootElement;
         Assert.Equal(20, root.GetProperty("kind").GetInt32());
         Assert.Equal(9022, root.GetProperty("noticeRow").GetInt32());
-        Assert.Equal(40, root.GetProperty("lightBefore").GetInt32());
+        Assert.Equal(40, root.GetProperty("lightBarBefore").GetInt32());
+        Assert.Equal(52, root.GetProperty("lightBarAfter").GetInt32());
+        Assert.Equal(5, root.GetProperty("lightYieldBefore").GetInt32());
+        Assert.Equal(5, root.GetProperty("lightYieldAfter").GetInt32());
+        Assert.Equal(12, root.GetProperty("lightDelta").GetInt32());
+        Assert.False(root.TryGetProperty("lightCap", out _));
         Assert.False(root.TryGetProperty("fateRewardId", out _));
         foreach (var p in root.EnumerateObject())
             if (p.Value.ValueKind == JsonValueKind.String)

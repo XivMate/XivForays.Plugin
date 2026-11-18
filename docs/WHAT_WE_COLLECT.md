@@ -20,7 +20,7 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
   records "a party member's kill" and which monster it was. It never records which party member.
 - **Eurekan kettle light (Pagos and Pyros only, under the Eureka recording toggle):** when your kettle gets light, the
   plugin records the game's message number for that notice (which grade of light, or "full", or a forge conversion; the
-  message text is not read), the kettle's value before and after when the game exposes it, which monster kill or FATE
+  message text is not read), the kettle's counter and light bar (numbers) before and after when the game exposes them, and the light gained, which monster kill or FATE
   completion just before it most likely caused it (monster id, level, whether it was mutated or adapted, your chain at
   the kill, kill by you or a party member as a category), and how many people are in your party. If several kills could
   have caused it, the record says so instead of guessing. Numbers only.

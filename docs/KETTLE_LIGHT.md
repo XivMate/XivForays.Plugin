@@ -10,56 +10,62 @@ kill or FATE that caused it. Only while Crowdsource data is on and the Eureka re
 | Grade of the light | LogMessage rows 9020 feeble, 9021 gentle, 9022 bright, 9023 brilliant, 9024 blinding, 9025 "light of a newborn star", 9026 "light of an exploding star" (game LogMessage sheet, checked against the local sheets). Row ids are the same in every client language, so no text is read. | Certain |
 | Kettle full | LogMessage row 9027 "cannot accumulate any more vitiated aether" | Certain |
 | Forge emptied | LogMessage row 3743 "convert the kettle's accumulated vitiated aether into ..."; row 3741 "Insufficient vitiated aether" is ignored | Certain |
-| Precise kettle value | A Cheat Engine table shared in the Eurekan Explorers Discord (pointer chain below). Not in FFXIVClientStructs. | Wired, guarded, unverified in game |
+| Precise kettle value | Yield and bar behind the Eureka content director (offsets below). Not named in FFXIVClientStructs. | Wired and guarded; seen to match the screen in Pyros |
 
-### The precise value
+### The precise value (yield and bar)
 
-Source: a Cheat Engine table shared in the Eurekan Explorers Discord for the light bar, described as working until the next
-game patch. It is a 4 byte value behind a pointer chain from the game exe. Cheat Engine lists the offsets last applied first
-(134, 20, C8, 10, 38), so the read is:
+Found by a read-only structs scan on 2026-11-18 (no Cheat Engine table needed, no raw exe address). The read is:
 
-    p = [exe base + 0x19053B8]
-    p = [p + 0x38]
-    p = [p + 0x10]
-    p = [p + 0xC8]
-    p = [p + 0x20]
-    value = int32 at p + 0x134        (the table's last seen value was 61)
+    director = EventFramework.Instance()->DirectorModule.ActiveContentDirector   (only when its Type is PublicContentEureka)
+    block    = pointer at director + 0x440        (read again at every sample; the block is rebuilt per instance, never cached)
+    yield    = int32 at block + 0x78              (kettles filled)
+    bar      = int32 at block + 0x1D8             (the light bar, 0 to 120 allowed)
 
 `Services/KettleLightValueSource` does this with read-only `ReadProcessMemory` on the game's own process (a bad address
-returns false, it cannot fault), a null and range check at every hop (`Core/KettleLightChain`), and no writes of any kind.
-It is polled once per 1 s signal tick, in Pagos and Pyros only.
+returns false, it cannot fault), a null and range check at every hop (`Core/KettleLightChain`), and no writes or game calls of
+any kind. The director comes from the FFXIVClientStructs static instance and its type field. The field at director + 0x440 is
+not named in ClientStructs. It is polled once per 1 s signal tick, in Pagos and Pyros only.
 
-Scale: not confirmed. 61 looks like a percent or a 0 to 100 bar, but nothing in the game data says so. The raw integer is
-recorded as `lightBefore`, `lightAfter`, `lightDelta`; values above 100000 or below 0 are treated as unreadable. Work out the
-unit from the first records (step 11 below), and note it here.
+Checked in Pyros on 2026-11-18: yield and bar matched the on-screen kettle. Pagos is expected to use the same offsets but is
+not yet confirmed. Re-check after a relog and a zone change (step 11 below).
+
+Scale: one yield is a number of bar points that is not yet known (the bar is allowed 0 to 120). Records therefore carry the
+raw values and the delta is `(yieldAfter - yieldBefore) * cap + barAfter - barBefore`. With the yield unchanged no cap is
+needed; with a yield change and an unknown cap `lightDelta` is absent and `lightCap` is absent. Work the cap out from the
+first records with a rollover and put it in `KettleLightChain.BarCap`.
 
 #### Guard (why it may switch itself off)
 
-The RVA is a raw address, not a ClientStructs field or a signature, so it is only read when both hold:
+The offsets are inside a struct ClientStructs does not describe, so they are only read when:
 
-1. The game version is in `KettleLightGuard.AllowedVersions` (now only 2026.11.03.0000.0000). On any other version it logs
-   once ("Kettle light value is off: ...") and returns null; the kind 20 records are then notice-only.
-2. The RVA lies in a writable, non-executable section of the loaded exe (read from the exe's PE headers in memory). A static
-   pointer cannot live in code.
-
-Finding at hand-over: on the installed 2026.11.03 build (ffxivgame.ver 2026.11.03.0000.0000, `ffxiv_dx11.exe`, read as a file
-only) RVA 0x19053B8 is inside the `.text` code section (sections: .text 0x1000 to 0x210D8E2, .rdata, .data from 0x28AE000),
-and nothing in the exe references it. So the raw address does not match this build, and the guard will keep the value off
-(with one log line) until a matching address is supplied. Either the table is for another build, or the figure was copied
-with a digit wrong. The ClientStructs `ida/data.yml` for 2026.11.03 has no entry at that address either (nearest named
-symbol is a constructor at 0x14190EFB0), and the Eureka entries it does know are only `IsInEureka`,
-`GetEurekaPublicContentDirector`, `PublicContentEureka` and `AgentEurekaChainInfo` and friends, none of which is a kettle.
+1. The game version is in `KettleLightGuard.AllowedVersions` (now only `2026.11.03.0000.0000`, the build they were found and
+   checked on). On any other version it logs once ("Kettle light value is off: ...") and returns null; the kind 20 records
+   are then notice-only. On the right version it logs "Kettle light value is on (game version ...)" once.
+2. Every reading passes the sanity check: bar 0 to 120 and yield 0 to 999. One impossible reading switches the source off for
+   the rest of the session, with one log line. An unresolved chain (no Eureka director, loading screen) is normal, returns
+   null and is retried at the next sample.
 
 #### Re-finding it after a patch
 
-1. Get the current table from the Discord (or find the value yourself in Cheat Engine: scan for the bar's number, kill
-   something that gives light, scan for the increased value, repeat; then pointer-scan with a depth of 5).
-2. Put the new base in `KettleLightChain.BaseRva` and the offsets in `PointerOffsets` / `ValueOffset`. Remember Cheat Engine
-   lists offsets last applied first.
+1. Run the developer structs scan (docs/DEV_SCANNER.md) to find the pointer into the Eureka director and the two ints, then
+   confirm them against the on-screen numbers.
+2. Put the offsets in `KettleLightChain` (`BlockPointerOffset`, `YieldOffset`, `BarOffset`).
 3. Add the game version to `KettleLightGuard.AllowedVersions` only after step 11 of the checklist passes on it.
-4. Prefer replacing the raw RVA with a ClientStructs field or a signature scan once the owning struct is known: the chain
-   starts at a static pointer, and the first hop (+0x38) and onward look like a director or agent object tree, which is a
-   better thing to resolve by signature than by RVA.
+
+#### What each record carries
+
+Per kettle light message, forge conversion, or change of the bar or yield (kind 20): `lightYieldBefore`, `lightBarBefore`
+(the last 1 s sample before the message), `lightYieldAfter`, `lightBarAfter` (read after it; when nothing changed, the latest
+sample), `lightDelta`, `lightCap`. A drop in the bar or yield (the forge converting the light) sets `forgeEmptied` even with
+no notice. The kill or FATE link is described below.
+
+#### Developer build only
+
+In a build made with `-p:DevScanner=true` (never in Release): one Dalamud log line per record, prefixed `[kettle]`, with
+tier, notice row, yield/bar before and after, delta and link; and the `/xfkettle` command, which prints the last 5 records to
+your own chat log (local echo only, nothing is sent). Both live in `Dev/KettleDevLog.cs` and the `DEV_SCANNER` guards in
+`Gathering/ForaySignalModule.cs`. The log lines and the command appear only while Crowdsource data is on (records are only
+built then).
 
 ## Linking
 
@@ -82,7 +88,6 @@ Needs a build installed by the maintainer; nothing here is done by the plugin fo
    outside the radius and expect 0.
 7. Join a party and repeat step 2: `groupSize` equals party size; a party member's kill gives `defeatBy` 2.
 8. Fill the kettle and kill again: a 9027 record with `lightFull` true.
-9. Convert at the Crystal Forge: a record with `forgeEmptied` true (row 3743). If the value source is on, `lightAfter` 0.
+9. Convert at the Crystal Forge: a record with `forgeEmptied` true (row 3743). If the value source is on, `lightBarAfter` and `lightYieldAfter` drop (usually to 0).
 10. Leave for Anemos or Hydatos: no kind 20 records. Untick Eureka: none either.
-11. Check the Dalamud log first: either no "Kettle light value is off" line, or the line names the reason (expected on 2026.11.03 until the address is corrected). If the value source is on, `lightBefore + lightDelta == lightAfter`, and the delta matches the grade across kills;
-    note the unit (raw or percent) from the first records.
+11. Check the Dalamud log first: expect "Kettle light value is on (game version 2026.11.03.0000.0000)". On any other build it says it is off and why. If the value source is on, `lightBarBefore + lightDelta == lightBarAfter` when the yield did not change, and the delta matches the grade across kills. Relog and change zone once and confirm the numbers still match the screen. Note the cap (bar points per yield) from the first rollover.

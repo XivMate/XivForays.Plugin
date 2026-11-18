@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Dalamud.Plugin.Services;
 using XivMate.DataGathering.Forays.Dalamud.Core;
@@ -7,36 +6,48 @@ using XivMate.DataGathering.Forays.Dalamud.Core;
 namespace XivMate.DataGathering.Forays.Dalamud.Services;
 
 /// <summary>
-/// Reads the kettle light value (read-only; see docs/KETTLE_LIGHT.md). The location comes from a Cheat Engine table shared
-/// in the Eurekan Explorers Discord, not from FFXIVClientStructs, so the raw chain is guarded: it is read only on a game
-/// version it was checked on and only when its base lies in writable data; otherwise it logs once and returns null, and the
-/// kind 20 records come from the kettle notices alone. Every read uses ReadProcessMemory on this process, which fails
-/// cleanly instead of faulting. Nothing is ever written.
+/// Reads the kettle yield and bar (read-only; see docs/KETTLE_LIGHT.md). The numbers sit behind the active Eureka content
+/// director (FFXIVClientStructs gives the director; the offsets inside it are not named there), so the source is on only for
+/// the game build they were checked on, and it switches itself off for the session, with one log line, if a reading is ever
+/// impossible. Every read uses ReadProcessMemory on this process, which fails cleanly instead of faulting. Nothing is written.
 /// </summary>
-internal sealed class KettleLightValueSource(IPluginLog log, Func<string?> gameVersion, IProcessMemory? memory = null, ulong? moduleBase = null)
+internal sealed class KettleLightValueSource(IPluginLog log, Func<string?> gameVersion, Func<ulong> directorAddress, IProcessMemory? memory = null)
 {
     private bool decided;
     private bool usable;
     private bool loggedUnreadable;
-    private ulong baseAddress;
     private IProcessMemory? reader;
 
-    /// <summary>The kettle value now, or null when it cannot be read. Called at most once per signal tick, in Pagos and Pyros only.</summary>
-    public uint? Read()
+    /// <summary>True once the source has been switched on and has not switched itself off.</summary>
+    public bool IsOn => decided && usable;
+
+    /// <summary>The kettle now, or null when it cannot be read. Called at most once per signal tick, in Pagos and Pyros only.</summary>
+    public KettleReading? Read()
     {
         if (!decided)
             Decide();
         if (!usable || reader is null)
             return null;
-        var value = KettleLightChain.Read(reader, baseAddress);
-        if (value is null && !loggedUnreadable)
+        var status = KettleLightChain.Try(reader, directorAddress(), out var reading);
+        switch (status)
         {
-            loggedUnreadable = true;
-            log.Information("Kettle light value: the pointer chain did not resolve (logged once). Notices are still recorded.");
+            case KettleReadStatus.OutOfRange:
+                usable = false;
+                log.Information("Kettle light value is off for this session: a reading was outside 0 to 120 (bar) or 0 to 999 (yield). Notices are still recorded.");
+                return null;
+            case KettleReadStatus.Unreadable:
+                // Not in the Eureka director yet (loading, other zone) is normal; say so once per run of failures.
+                if (!loggedUnreadable)
+                {
+                    loggedUnreadable = true;
+                    log.Debug("Kettle light value: the Eureka director chain did not resolve (logged once per run).");
+                }
+
+                return null;
+            default:
+                loggedUnreadable = false;
+                return reading;
         }
-        else if (value is not null)
-            loggedUnreadable = false;
-        return value;
     }
 
     private void Decide()
@@ -45,11 +56,13 @@ internal sealed class KettleLightValueSource(IPluginLog log, Func<string?> gameV
         try
         {
             reader = memory ?? new SelfProcessMemory();
-            baseAddress = moduleBase ?? (ulong)Process.GetCurrentProcess().MainModule!.BaseAddress;
-            var reason = KettleLightGuard.Reason(gameVersion(), KettleLightGuard.SectionCharacteristics(reader, baseAddress, KettleLightChain.BaseRva));
+            var version = gameVersion();
+            var reason = KettleLightGuard.Reason(version);
             usable = reason is null;
             if (reason is not null)
                 log.Information($"Kettle light value is off: {reason}. Notices are still recorded.");
+            else
+                log.Information($"Kettle light value is on (game version {version}).");
         }
         catch (Exception ex)
         {

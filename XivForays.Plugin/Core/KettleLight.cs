@@ -85,11 +85,11 @@ internal readonly record struct LightSnapshot(uint? Chain, uint? ChainAgeMs, byt
 
 /// <summary>A finished light event, ready to become a kind 20 record.</summary>
 internal sealed record LightEvent(
-    long AtMs, Guid VisitId, uint TerritoryId, uint? Row, byte? Tier, bool Full, bool Forge, uint? Before,
-    uint? After, LightSnapshot Snapshot, LightLinkResult Link)
+    long AtMs, Guid VisitId, uint TerritoryId, uint? Row, byte? Tier, bool Full, bool Forge, KettleReading? Before,
+    KettleReading? After, LightSnapshot Snapshot, LightLinkResult Link)
 {
     public byte Source => (byte)((Row != null ? 1 : 0) | (Before != null || After != null ? 2 : 0));
-    public int? Delta => Before is { } b && After is { } a ? (int)a - (int)b : null;
+    public int? Delta => KettleLightChain.Delta(Before, After, KettleLightChain.BarCap);
 
     /// <summary>The kind 20 record on top of <paramref name="context"/> (zone, map, weather, levels).</summary>
     public Observation ToObservation(Observation context)
@@ -104,9 +104,12 @@ internal sealed record LightEvent(
             LightTier = Tier,
             LightFull = Full ? true : null,
             ForgeEmptied = Forge ? true : null,
-            LightBefore = Before,
-            LightAfter = After,
+            LightYieldBefore = Before?.Yield,
+            LightBarBefore = Before?.Bar,
+            LightYieldAfter = After?.Yield,
+            LightBarAfter = After?.Bar,
             LightDelta = Delta,
+            LightCap = KettleLightChain.BarCap,
             LightSource = Source,
             LightLink = (byte)Link.Kind,
             LightCandidates = (byte)Math.Min(Link.Candidates, byte.MaxValue),
@@ -154,8 +157,8 @@ internal sealed class LightTracker
     {
         public long AtMs;
         public uint? Row;
-        public uint? Before;
-        public uint? After;
+        public KettleReading? Before;
+        public KettleReading? After;
         public bool HasValue;
         public bool Full;
         public bool Forge;
@@ -165,7 +168,7 @@ internal sealed class LightTracker
     private readonly List<LightKill> kills = new();
     private readonly List<LightFate> fates = new();
     private readonly List<Pending> pending = new();
-    private uint? lastValue;
+    private KettleReading? lastValue;
     private Guid visitId;
     private uint territory;
 
@@ -187,8 +190,8 @@ internal sealed class LightTracker
         Trim(fate.AtMs);
     }
 
-    /// <summary>The kettle value read now. The first value of a visit is a baseline, not a change.</summary>
-    public void Value(long nowMs, Guid visit, uint territoryId, uint? value, LightSnapshot snapshot)
+    /// <summary>The kettle (yield and bar) read now. The first value of a visit is a baseline, not a change.</summary>
+    public void Value(long nowMs, Guid visit, uint territoryId, KettleReading? value, LightSnapshot snapshot)
     {
         Visit(visit, territoryId);
         if (value is not { } v)
@@ -212,6 +215,9 @@ internal sealed class LightTracker
         open.HasValue = true;
         open.Before = before;
         open.After = v;
+        // The bar or yield going down is the forge converting the light, with or without its notice.
+        if (v.Yield < before.Yield || v.Yield == before.Yield && v.Bar < before.Bar)
+            open.Forge = true;
     }
 
     /// <summary>A kettle LogMessage row.</summary>
@@ -232,11 +238,9 @@ internal sealed class LightTracker
         open.Forge = row == KettleRows.ForgeConverted;
         // The notice time wins: it is what the kill link is measured against.
         open.AtMs = Math.Min(open.AtMs, nowMs);
-        if (open.Forge && !open.HasValue && lastValue is { } known)
-        {
-            // The forge empties the kettle; the value change (if readable) merges in on its own.
+        // The last 1 s sample before the message is the "before"; the value after it merges in on its own (or is read at finish).
+        if (!open.HasValue && lastValue is { } known)
             open.Before = known;
-        }
     }
 
     /// <summary>Finished events (older than <see cref="HoldMs"/>), oldest first.</summary>
@@ -287,6 +291,9 @@ internal sealed class LightTracker
 
     private LightEvent Finish(Pending p)
     {
+        // No change seen after the message: the latest sample is the "after" (the bar did not move, e.g. the kettle was full).
+        if (!p.HasValue && p.Before != null && p.After == null && lastValue is { } latest)
+            p.After = latest;
         var link = LightLinker.Link(p.AtMs, kills, fates);
         return new LightEvent(p.AtMs, visitId, territory, p.Row, p.Row is { } r ? KettleRows.Tier(r) : null, p.Full,
             p.Forge, p.Before, p.After, p.Snapshot, link);
