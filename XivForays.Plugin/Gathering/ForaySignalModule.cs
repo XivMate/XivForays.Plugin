@@ -166,6 +166,7 @@ internal sealed partial class ForaySignalModule(
         {
             Kind = ObservationKind.Chain, ChainNumber = number, ChainSecondsLeft = secondsLeft
         };
+        NoteChainNotice(number, chainRecord.ObservedAtMs);
         linker.Chain(chainRecord, Emit);
         playerContext.NoteChain(number, chainRecord.ObservedAtMs);
     }
