@@ -132,7 +132,7 @@ internal sealed unsafe class ScannerHost : IDisposable
             }
             var todo = gameGui.GetAddonByName("_ToDoList");
             if (!todo.IsNull)
-                list.Add(new KnownRoot("_ToDoList", todo.Address, (ulong)sizeof(AtkUnitBase)));
+                list.Add(new KnownRoot("_ToDoList", (ulong)todo.Address, (ulong)sizeof(AtkUnitBase)));
         }
         catch (Exception ex)
         {
