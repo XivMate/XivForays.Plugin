@@ -6,6 +6,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dalamud.Game.Command;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Game.Event;
+using FFXIVClientStructs.FFXIV.Client.Game.InstanceContent;
+using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.System.Framework;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
@@ -43,7 +46,7 @@ internal sealed unsafe class ScannerHost : IDisposable
         this.folder = folder;
         Directory.CreateDirectory(Path.Combine(folder, "commands"));
         Directory.CreateDirectory(Path.Combine(folder, "results"));
-        controller = new ScannerController(memory, GameModule, Roots, Path.Combine(folder, "results"), m => log.Information(m));
+        controller = new ScannerController(memory, GameModule, Roots, Path.Combine(folder, "results"), m => log.Information(m), structs: StructRoots);
         framework.Update += Tick;
         commands.AddHandler(SlashCommand, new CommandInfo(OnSlash) { HelpMessage = "Developer value scanner: status or stop" });
         log.Information($"[scanner] developer scanner ready; command files go in {Path.Combine(folder, "commands")}");
@@ -84,6 +87,56 @@ internal sealed unsafe class ScannerHost : IDisposable
         catch (Exception ex)
         {
             log.Warning($"[scanner] could not list the known roots: {ex.Message}");
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// The structs scanStructs and scanOwner roots:"structs" look inside: event framework, the active content director (as
+    /// the Eureka director when its type says so), UIState, the agent module and the agents that look Eureka related,
+    /// and the _ToDoList window. Instances and sizes only; nothing is called that changes game state.
+    /// </summary>
+    private IReadOnlyList<KnownRoot> StructRoots()
+    {
+        var list = new List<KnownRoot>();
+        try
+        {
+            var events = EventFramework.Instance();
+            if (events is not null)
+            {
+                list.Add(new KnownRoot("EventFramework", (ulong)events, (ulong)sizeof(EventFramework)));
+                var director = events->DirectorModule.ActiveContentDirector;
+                if (director is not null)
+                {
+                    list.Add(new KnownRoot("ActiveContentDirector", (ulong)director, (ulong)sizeof(PublicContentDirector)));
+                    if (((PublicContentDirector*)director)->Type == PublicContentDirectorType.Eureka)
+                        list.Add(new KnownRoot("PublicContentEureka", (ulong)director, (ulong)sizeof(PublicContentEureka)));
+                }
+            }
+            var ui = UIState.Instance();
+            if (ui is not null)
+                list.Add(new KnownRoot("UIState", (ulong)ui, (ulong)sizeof(UIState)));
+            var module = UIModule.Instance()->GetAgentModule();
+            if (module is not null)
+            {
+                list.Add(new KnownRoot("AgentModule", (ulong)module, (ulong)sizeof(AgentModule)));
+                for (var i = 0; i < module->Agents.Length; i++)
+                {
+                    var agent = module->Agents[i].Value;
+                    if (agent == null)
+                        continue;
+                    var name = ((AgentId)i).ToString();
+                    if (new[] { "Eureka", "Elemental", "Magia", "Content", "ToDo" }.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase)))
+                        list.Add(new KnownRoot($"Agent#{i}:{name}", (ulong)agent, 0x2000));
+                }
+            }
+            var todo = gameGui.GetAddonByName("_ToDoList");
+            if (!todo.IsNull)
+                list.Add(new KnownRoot("_ToDoList", todo.Address, (ulong)sizeof(AtkUnitBase)));
+        }
+        catch (Exception ex)
+        {
+            log.Warning($"[scanner] could not list the struct roots: {ex.Message}");
         }
         return list;
     }

@@ -174,6 +174,69 @@ public sealed class DevScannerTests
         Assert.Contains("62", System.Text.Json.JsonSerializer.Serialize(resolved), StringComparison.Ordinal);
     }
 
+    // Layout: struct S at Base+0x100 (size 0x80); its field +0x10 points to object O at Base+0x400; O+0x28 points to
+    // Base+0x800, which is a block holding the target value at +0x20 (target = Base+0x820).
+    private static FakeMemory StructWorld(out KnownRoot root, out ulong target)
+    {
+        var mem = new FakeMemory(0x2000);
+        root = new KnownRoot("S", Base + 0x100, 0x80);
+        mem.SetPtr(0x110, Base + 0x400);
+        mem.SetPtr(0x428, Base + 0x800);
+        mem.SetPtr(0x130, Base + 0x700);   // direct hop: 0x700 + 0x120 = 0x820
+        target = Base + 0x820;
+        return mem;
+    }
+
+    [Fact]
+    public void StructProbeFindsInsideAndPointerFields()
+    {
+        var mem = StructWorld(out var root, out var target);
+        Assert.True(StructProbe.Inside(root, Base + 0x180 + 0x10, 0x2000, out var offset));
+        Assert.Equal(0x90, offset);
+        Assert.False(StructProbe.Inside(root, Base + 0x180 + 0x2001, 0x2000, out _));
+        var hits = StructProbe.FindFields(StructProbe.ReadStruct(mem, root), target);
+        Assert.Equal(2, hits.Count);
+        Assert.Equal(0x10UL, hits[0].FieldOffset);
+        Assert.Equal(0x420, hits[0].PointeeToTarget);
+        Assert.Equal(0x30UL, hits[1].FieldOffset);
+        Assert.Equal(0x120, hits[1].PointeeToTarget);
+        var report = StructProbe.Describe(mem, [root], target);
+        Assert.Contains("field +0x30", report, StringComparison.Ordinal);
+        Assert.Contains("S: base 0x" + root.Address.ToString("X"), report, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StructChainsAreOneAndTwoHopsAndResolveToTheTarget()
+    {
+        var mem = StructWorld(out var root, out var target);
+        var chains = StructProbe.Chains(mem, [root], target, 0x400, 2, 0x100, DateTime.UtcNow.AddSeconds(30));
+        Assert.Equal(2, chains.Count);
+        Assert.Equal(1, chains[0].Depth);
+        Assert.Equal(2, chains[1].Depth);
+        foreach (var chain in chains)
+            Assert.Equal(target, ChainResolver.Resolve(mem, chain.StartAddress, chain.Offsets));
+        Assert.Equal("S+0x10", chains[1].Start);
+        Assert.Single(StructProbe.Chains(mem, [root], target, 0x400, 1, 0x100, DateTime.UtcNow.AddSeconds(30)));
+        Assert.Empty(StructProbe.Chains(mem, [root], target, 0x400, 2, 0x100, DateTime.UtcNow.AddSeconds(-1)));
+    }
+
+    [Fact]
+    public void ControllerStructCommandsWriteFilesAndOwnerUsesStructsFirst()
+    {
+        var mem = StructWorld(out var root, out var target);
+        var dir = Directory.CreateTempSubdirectory("scan-").FullName;
+        using var controller = new ScannerController(mem, () => new ModuleRange("game.exe", Base, 0x10), () => [], dir, _ => { },
+            new Throttle(sleep: _ => { }), () => [root]);
+        var summary = controller.Execute("s1", "scanStructs", JsonNode.Parse($"{{\"address\":\"0x{target:X}\"}}")!.AsObject());
+        Assert.Contains("withPointers", System.Text.Json.JsonSerializer.Serialize(summary), StringComparison.Ordinal);
+        Assert.Contains("field +0x30", File.ReadAllText(Path.Combine(dir, "s1-structs.txt")), StringComparison.Ordinal);
+        controller.Execute("o1", "scanOwner", JsonNode.Parse($"{{\"address\":\"0x{target:X}\",\"roots\":\"structs\",\"timeLimit\":5,\"maxOffset\":1024,\"objectBytes\":256}}")!.AsObject());
+        controller.WaitIdle();
+        var owner = File.ReadAllText(Path.Combine(dir, "o1-owner.txt"));
+        Assert.Contains("S+0x10", owner, StringComparison.Ordinal);
+        Assert.Contains("generic heap walk skipped", owner, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ScannerHasNoWriteApi()
     {
