@@ -48,6 +48,7 @@ internal sealed partial class ForaySignalModule(
         LogNotices.GameVersionNumber(data.GameData.Repositories.TryGetValue("ffxiv", out var repo) ? repo.Version : null));
     private Dictionary<ulong, (uint BaseId, Vector3 Position)> treasures = new();
     private Dictionary<ushort, Observation> encounters = new();
+    private readonly PortalTracker portals = new();
     private Guid visitId;
     private long lastHeartbeat;
     private bool lootListening;
@@ -364,6 +365,18 @@ internal sealed partial class ForaySignalModule(
         {
             log.Warning($"Foray signal sampling failed ({ex.GetType().Name}).");
         }
+    }
+
+    /// <summary>Kind 21: Baldesion Arsenal portals (event objects 2009726 / 2009727) on the Hydatos field map.</summary>
+    private void SamplePortals(Observation context)
+    {
+        var table = new List<PortalSnapshot>();
+        if (PortalTracker.InScope(context.TerritoryId, context.MapId))
+            foreach (var obj in objects)
+                if (obj.ObjectKind == ObjectKind.EventObj && PortalTracker.IsPortal(obj.BaseId))
+                    table.Add(new PortalSnapshot(obj.GameObjectId, obj.BaseId, obj.Position.X, obj.Position.Y,
+                        obj.Position.Z));
+        portals.Sample(context, table, Emit);
     }
 
     private void SampleTreasure(Observation context)

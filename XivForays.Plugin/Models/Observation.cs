@@ -39,7 +39,10 @@ internal enum ObservationKind
     PlayerContext = 19,
 
     /// <summary>Eurekan kettle light (Pagos, Pyros): a light notice, a change of the kettle value, or a forge conversion, linked to its cause. See docs/WHAT_WE_COLLECT.md.</summary>
-    KettleLight = 20
+    KettleLight = 20,
+
+    /// <summary>Baldesion Arsenal portal (Hydatos field map): an Unstable (blue) or Stable (red) Aetherial Node entering the object table (state 1) or leaving it (state 0). See docs/WHAT_WE_COLLECT.md.</summary>
+    Portal = 21
 }
 
 /// <summary>FATE result on FateEnded: from the end state (Ended/Failed), else from the last progress (100 = success).</summary>
@@ -234,4 +237,13 @@ internal sealed record Observation
 
     /// <summary>Kind 20: the player's party size (1 = solo), a number only.</summary>
     public byte? GroupSize { get; init; }
+
+    /// <summary>Kind 21: a random id for one portal object in this visit (never the game's object id).</summary>
+    public Guid? ObjectTrackId { get; init; }
+
+    /// <summary>Kind 21: 1 = blue (Unstable Aetherial Node), 2 = red (Stable Aetherial Node).</summary>
+    public byte? PortalColour { get; init; }
+
+    /// <summary>Kind 21 gone record: ms from first to last sighting.</summary>
+    public uint? VisibleMs { get; init; }
 }

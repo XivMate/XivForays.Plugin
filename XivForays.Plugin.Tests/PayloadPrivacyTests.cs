@@ -142,6 +142,7 @@ public class PayloadPrivacyTests
         Assert.Equal(18, (int)ObservationKind.EnemyAggro);
         Assert.Equal(19, (int)ObservationKind.PlayerContext);
         Assert.Equal(20, (int)ObservationKind.KettleLight);
-        Assert.Equal(Enumerable.Range(1, 20), Enum.GetValues<ObservationKind>().Select(k => (int)k));
+        Assert.Equal(21, (int)ObservationKind.Portal);
+        Assert.Equal(Enumerable.Range(1, 21), Enum.GetValues<ObservationKind>().Select(k => (int)k));
     }
 }
