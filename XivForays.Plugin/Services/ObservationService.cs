@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using Dalamud.Plugin.Services;
+using Lumina.Excel.Sheets;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using XivMate.DataGathering.Forays.Dalamud.Core;
@@ -12,6 +13,7 @@ namespace XivMate.DataGathering.Forays.Dalamud.Services;
 
 internal sealed class ObservationService(
     IClientState clientState,
+    IDataManager dataManager,
     ForayService forayService,
     SchedulerService scheduler,
     ApiService api,
@@ -23,6 +25,7 @@ internal sealed class ObservationService(
     private int uploading;
     private volatile bool enabled;
     private UploadOutcome? lastWarned;
+    private readonly Dictionary<uint, (byte WeatherId, byte Rate)[]> weatherTables = new();
 
     public bool Enabled => enabled;
 
@@ -49,15 +52,18 @@ internal sealed class ObservationService(
     {
         var territory = clientState.TerritoryType;
         var weather = WeatherManager.Instance();
-        var weatherId = weather == null ? (byte)0 : weather->GetCurrentWeather();
+        var shownWeatherId = weather == null ? (byte)0 : weather->GetCurrentWeather();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var weatherId = CalculatedWeather.Pick(now, WeatherTable(territory));
         var player = PlayerState.Instance();
         var result = new Observation
         {
-            ObservedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            ObservedAtMs = now,
             VisitId = forayService.VisitId,
             TerritoryId = territory,
             MapId = clientState.MapId,
-            WeatherId = weatherId == 0 ? null : weatherId
+            WeatherId = weatherId == 0 ? null : weatherId,
+            ShownWeatherId = shownWeatherId == 0 ? null : shownWeatherId
         };
 
         if (player == null)
@@ -84,6 +90,34 @@ internal sealed class ObservationService(
         }
 
         return result;
+    }
+
+    // The zone's weather rate table, read once per territory from the TerritoryType and WeatherRate sheets.
+    private ReadOnlySpan<(byte WeatherId, byte Rate)> WeatherTable(uint territory)
+    {
+        if (weatherTables.TryGetValue(territory, out var cached))
+            return cached;
+
+        var table = Array.Empty<(byte, byte)>();
+        try
+        {
+            if (dataManager.GetExcelSheet<TerritoryType>().TryGetRow(territory, out var row)
+                && row.WeatherRate.RowId != 0
+                && dataManager.GetExcelSheet<WeatherRate>().TryGetRow(row.WeatherRate.RowId, out var rates))
+            {
+                var list = new List<(byte, byte)>();
+                for (var i = 0; i < rates.Weather.Count && i < rates.Rate.Count; i++)
+                    list.Add(((byte)rates.Weather[i].RowId, rates.Rate[i]));
+                table = list.ToArray();
+            }
+        }
+        catch (Exception ex)
+        {
+            log.Warning(ex, "Weather rate table read failed for territory {Territory}", territory);
+        }
+
+        weatherTables[territory] = table;
+        return table;
     }
 
     private static uint? Nonzero(uint value) => value == 0 ? null : value;
