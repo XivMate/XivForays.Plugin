@@ -66,13 +66,28 @@ internal sealed partial class ForaySignalModule
     }
 
     /// <summary>An "EXP chain #n" notice: kept by time so a light gain can take the chain number of its own kill.</summary>
-    private void NoteChainNotice(uint number, long atMs) => chainNotices.Add(number, atMs);
+    private void NoteChainNotice(uint number, long atMs)
+    {
+        chainNotices.Add(number, atMs);
+        NoteOrder("chain #" + number, atMs);
+    }
+
+    private int orderLogged;
+
+    /// <summary>Raw notice order for the first 60 events of a session (numbers only), to confirm the order of light, chain and defeat notices.</summary>
+    private void NoteOrder(string what, long atMs)
+    {
+        if (orderLogged++ < 60)
+            lightLog.Add("order t=" + atMs % 1_000_000 + " " + what);
+    }
 
     /// <summary>A defeat notice (own or party): remembered at once, before the enemy is resolved, with the enemy name id.</summary>
     private void NoteDefeatNotice(Observation defeat, uint? nameId)
     {
-        if (ForayZones.IsEureka(defeat.TerritoryId))
-            gainKills.Upsert(GainKill.From(defeat, nameId));
+        if (!ForayZones.IsEureka(defeat.TerritoryId))
+            return;
+        gainKills.Upsert(GainKill.From(defeat, nameId));
+        NoteOrder("defeat by " + defeat.DefeatBy + " nameId " + nameId, defeat.ObservedAtMs);
     }
 
     /// <summary>A kill record that has been resolved and is being recorded: remembered for the 3 s light link.</summary>
@@ -103,6 +118,7 @@ internal sealed partial class ForaySignalModule
         if (pendingGains.Any(p => p.Row == row && p.Params.AsSpan().SequenceEqual(parameters) &&
                                   Math.Abs(context.ObservedAtMs - p.NoticeMs) <= GainDedupeMs))
             return;
+        NoteOrder("light row " + row, context.ObservedAtMs);
         var snapshot = playerContext.Snapshot(context);
         pendingGains.Add(new PendingGain(context.ObservedAtMs, context.ObservedAtMs + GainHoldMs, context, snapshot, row, type, parameters));
     }

@@ -45,9 +45,25 @@ internal class DebugTab(
         RenderPoseTable();
 
         ImGui.TextUnformatted("Last light gains (newest first): " + lightGains.Source);
-        foreach (var line in lightGains.Recent)
-            ImGui.TextUnformatted(line);
+        if (ImGui.BeginTable("LightGainTable", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.SizingStretchProp))
+        {
+            foreach (var head in new[] { "Time", "Chain", "Light", "Amount", "Enemy", "Party", "EXP buffs" })
+                ImGui.TableSetupColumn(head);
+            ImGui.TableHeadersRow();
+            foreach (var r in lightGains.Table)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(r.At.ToLocalTime().ToString("HH:mm:ss"));
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(r.Chain?.ToString() ?? "-");
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(r.LightName);
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(r.AmountText);
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(r.EnemyText);
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(r.Party.ToString());
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(r.Buffs);
+            }
 
+            ImGui.EndTable();
+        }
         if (Debug)
         {
             enemies = enemyTrackingService.GetVisibleEnemies();

@@ -56,6 +56,48 @@ public class LightGainTests
     }
 
     [Fact]
+    public void ChainNoticeAfterTheLightNoticeIsAttached()
+    {
+        var chains = new ChainNotices();
+        chains.Add(7, 10_900);
+        chains.Add(8, 14_000);
+        var found = chains.Find(10_000, 10_000);
+        Assert.Equal(7u, found!.Value.Number);
+        Assert.Equal(900, found.Value.GapMs);
+    }
+
+    [Fact]
+    public void ChainNoticeBeforeTheKillIsAttachedAndFarOnesAreNot()
+    {
+        var chains = new ChainNotices();
+        chains.Add(30, 9_000);
+        Assert.Equal(30u, chains.Find(10_000, 10_500)!.Value.Number);
+        Assert.Null(chains.Find(13_001, 13_001));
+    }
+
+    [Fact]
+    public void KillAfterTheLightNoticeIsFoundByFindAfter()
+    {
+        var kills = new GainKills();
+        kills.Add(Kill(10_800, 5));
+        Assert.Null(kills.Find(10_000));
+        Assert.Equal(5u, kills.FindAfter(10_000, 1800)!.Value.Kill.GameId);
+        Assert.Equal(800u, kills.FindAfter(10_000, 1800)!.Value.GapMs);
+        Assert.Null(kills.FindAfter(10_000, 500));
+    }
+
+    [Fact]
+    public void UpsertFillsTheEntryOfTheSameDefeat()
+    {
+        var kills = new GainKills();
+        kills.Upsert(new GainKill(10_000, null, null, null, null, 1, null, 77));
+        kills.Upsert(Kill(10_000, 5));
+        var link = kills.Find(10_500)!.Value.Kill;
+        Assert.Equal(5u, link.GameId);
+        Assert.Equal(77u, link.NameId);
+    }
+
+    [Fact]
     public void NoKillMeansNoLink()
     {
         Assert.Null(new GainKills().Find(5000));
