@@ -183,6 +183,7 @@ internal sealed partial class ForaySignalModule(
             ChainNumber = chainAtKill.Number,
             ChainAgeMs = chainAtKill.AgeMs
         };
+        NoteDefeatNotice(defeat, enemyNameId);
         linker.Defeat(defeat, enemyNameId, enemies.IdentifyDefeat, Emit);
     }
 

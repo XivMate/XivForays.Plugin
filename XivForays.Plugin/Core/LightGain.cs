@@ -28,10 +28,12 @@ internal static class LightGainRows
 }
 
 /// <summary>One kill (own or party) as the light link needs it.</summary>
-internal readonly record struct GainKill(long AtMs, uint? GameId, bool? IsMutated, bool? IsAdapted, byte? Form, byte? DefeatBy, Guid? TrackId)
+internal readonly record struct GainKill(long AtMs, uint? GameId, bool? IsMutated, bool? IsAdapted, byte? Form, byte? DefeatBy, Guid? TrackId,
+    uint? NameId = null, byte? Level = null)
 {
-    public static GainKill From(Observation kill) =>
-        new(kill.ObservedAtMs, kill.GameId, kill.IsMutated, kill.IsAdapted, kill.Form, kill.DefeatBy, kill.EnemyTrackId);
+    public static GainKill From(Observation kill, uint? nameId = null) =>
+        new(kill.ObservedAtMs, kill.GameId, kill.IsMutated, kill.IsAdapted, kill.Form, kill.DefeatBy, kill.EnemyTrackId, nameId,
+            kill.EnemyElementalLevel is > 0 ? kill.EnemyElementalLevel : kill.EnemyCombatLevel);
 }
 
 /// <summary>The recent kills, newest last. The link picks the latest kill within the window before a light notice.</summary>
@@ -50,6 +52,32 @@ internal sealed class GainKills
             kills.RemoveAt(0);
     }
 
+    /// <summary>Adds the kill, or fills in the entry already noted for the same defeat notice (same time and source).</summary>
+    public void Upsert(GainKill kill)
+    {
+        var i = kills.FindIndex(k => k.AtMs == kill.AtMs && k.DefeatBy == kill.DefeatBy);
+        if (i < 0)
+        {
+            Add(kill);
+            return;
+        }
+
+        kills[i] = kill with { NameId = kill.NameId ?? kills[i].NameId };
+    }
+
+    /// <summary>The earliest kill that came 0 to <paramref name="maxMs"/> after the notice (the defeat notice can trail the light notice).</summary>
+    public (GainKill Kill, uint GapMs)? FindAfter(long noticeMs, long maxMs)
+    {
+        foreach (var k in kills)
+        {
+            var gap = k.AtMs - noticeMs;
+            if (gap is > 0 && gap <= maxMs)
+                return (k, (uint)gap);
+        }
+
+        return null;
+    }
+
     public void Clear() => kills.Clear();
 
     /// <summary>The latest kill from 0 to 3000 ms before <paramref name="noticeMs"/>, with the gap; null when there is none.</summary>
@@ -63,6 +91,33 @@ internal sealed class GainKills
         }
 
         return null;
+    }
+}
+
+/// <summary>The EXP chain notices ("EXP chain #n", row 549), newest last, so a light gain gets the chain number of its own kill.</summary>
+internal sealed class ChainNotices
+{
+    public const long WindowMs = 3000;
+    private const int Keep = 16;
+    private readonly List<(uint Number, long AtMs)> notices = [];
+
+    public void Add(uint number, long atMs)
+    {
+        notices.Add((number, atMs));
+        if (notices.Count > Keep)
+            notices.RemoveAt(0);
+    }
+
+    public void Clear() => notices.Clear();
+
+    /// <summary>The chain notice nearest in time to <paramref name="aroundMs"/> (the kill, else the light notice) within 3000 ms either way; Gap is notice time minus light notice time.</summary>
+    public (uint Number, long GapMs)? Find(long aroundMs, long lightNoticeMs)
+    {
+        (uint Number, long AtMs)? best = null;
+        foreach (var n in notices)
+            if (Math.Abs(n.AtMs - aroundMs) <= WindowMs && (best == null || Math.Abs(n.AtMs - aroundMs) <= Math.Abs(best.Value.AtMs - aroundMs)))
+                best = n;
+        return best is { } b ? (b.Number, b.AtMs - lightNoticeMs) : null;
     }
 }
 
@@ -149,6 +204,44 @@ internal sealed class LightGainLog(string? filePath = null)
     private readonly object gate = new();
     private readonly List<string> lines = [];
     public const int Keep = 5;
+    private readonly List<LightRow> rows = [];
+    private readonly string? csvPath = filePath == null ? null : Path.ChangeExtension(filePath, ".csv");
+
+    public static readonly string[] TypeNames =
+        ["?", "feeble", "gentle", "bright", "brilliant", "blinding", "newborn star", "exploding star", "kettle full", "forge converted"];
+
+    /// <summary>The table rows for the Debug tab, newest first.</summary>
+    public LightRow[] Table
+    {
+        get
+        {
+            lock (gate)
+                return rows.ToArray();
+        }
+    }
+
+    /// <summary>Adds a finished gain: the text line, the table row and one CSV line (enemy names only, never player names).</summary>
+    public void Add(string line, LightRow row)
+    {
+        lock (gate)
+        {
+            rows.Insert(0, row);
+            if (rows.Count > 8)
+                rows.RemoveAt(rows.Count - 1);
+            if (csvPath != null)
+                try
+                {
+                    var header = !File.Exists(csvPath);
+                    File.AppendAllText(csvPath, (header ? LightRow.CsvHeader + Environment.NewLine : "") + row.Csv() + Environment.NewLine);
+                }
+                catch (Exception)
+                {
+                    // The local file is a convenience; never let it break recording.
+                }
+        }
+
+        Add(line);
+    }
 
     public string Source { get; set; } = "value source: not started";
 
@@ -197,4 +290,26 @@ internal sealed class LightGainLog(string? filePath = null)
             o.IsMutated == true ? 1 : 0, o.IsAdapted == true ? 1 : 0, Num(o.ChainNumber), buffs, Num(exp),
             o.Situation?.GroupSize ?? 0);
     }
+}
+
+/// <summary>One light gain as the Debug table and light-gains.csv show it. Enemy name only; no player names.</summary>
+internal sealed record LightRow(
+    DateTimeOffset At, uint? Chain, long? ChainGapMs, byte Type, int? Amount, bool Wrapped, string Enemy, bool Mutated, bool Adapted,
+    uint? BnpcId, byte? EnemyLevel, int Party, string Buffs, string StatusIds, int? BarBefore, int? BarAfter, int? YieldBefore,
+    int? YieldAfter, uint? ExpBefore, uint? ExpAfter, uint? ExpNeeded, uint? ElementalLevel, long? KillGapMs, uint Row)
+{
+    public const string CsvHeader =
+        "time_utc,chain,chain_gap_ms,light,amount,wrapped,enemy,mutated,adapted,bnpc_id,enemy_level,party_size,exp_buffs,bar_before,bar_after,yield_before,yield_after,status_ids,exp_before,exp_after,exp_needed,elemental_level,kill_gap_ms,notice_row";
+
+    public string LightName => Type < LightGainLog.TypeNames.Length ? LightGainLog.TypeNames[Type] : "?";
+    public string AmountText => Amount is { } a ? a.ToString(System.Globalization.CultureInfo.InvariantCulture) : Wrapped ? "wrap?" : "-";
+    public string EnemyText => Enemy == "" ? "none" : Enemy + (Mutated ? " (M)" : "") + (Adapted ? " (A)" : "");
+
+    private static string N<T>(T? v) where T : struct => v == null ? "" : Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) ?? "";
+
+    private static string Q(string s) => s.IndexOfAny([',', '"', '\n']) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+
+    public string Csv() => string.Join(",", At.ToString("o"), N(Chain), N(ChainGapMs), LightName, N(Amount), Wrapped ? 1 : 0, Q(Enemy),
+        Mutated ? 1 : 0, Adapted ? 1 : 0, N(BnpcId), N(EnemyLevel), Party, Q(Buffs), N(BarBefore), N(BarAfter), N(YieldBefore),
+        N(YieldAfter), Q(StatusIds), N(ExpBefore), N(ExpAfter), N(ExpNeeded), N(ElementalLevel), N(KillGapMs), Row);
 }
