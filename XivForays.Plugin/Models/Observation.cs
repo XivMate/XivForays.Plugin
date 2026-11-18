@@ -36,7 +36,10 @@ internal enum ObservationKind
     EnemyAggro = 18,
 
     /// <summary>The local player's foray context (levels, magia board, chain, group jobs, allow-listed statuses, instance).</summary>
-    PlayerContext = 19
+    PlayerContext = 19,
+
+    /// <summary>Baldesion Arsenal portal (Hydatos field map): an Unstable (blue) or Stable (red) Aetherial Node entering the object table (state 1) or leaving it (state 0). See docs/WHAT_WE_COLLECT.md.</summary>
+    Portal = 21
 }
 
 /// <summary>FATE result on FateEnded: from the end state (Ended/Failed), else from the last progress (100 = success).</summary>
@@ -188,4 +191,16 @@ internal sealed record Observation
 
     /// <summary>Kind 14: the loot and defeat notice hook is attached.</summary>
     public bool? LootListening { get; init; }
+
+    /// <summary>Kind 21: a random id for one portal object in this visit (never the game's object id).</summary>
+    public Guid? ObjectTrackId { get; init; }
+
+    /// <summary>Kind 21: 1 = blue (Unstable Aetherial Node), 2 = red (Stable Aetherial Node).</summary>
+    public byte? PortalColour { get; init; }
+
+    /// <summary>Kind 21: Eorzea time as minutes since midnight (0 to 1439).</summary>
+    public ushort? EorzeaMinutes { get; init; }
+
+    /// <summary>Kind 21 gone record: ms from first to last sighting.</summary>
+    public uint? VisibleMs { get; init; }
 }

@@ -141,6 +141,8 @@ public class PayloadPrivacyTests
         Assert.Equal(17, (int)ObservationKind.EnemyIdleTrack);
         Assert.Equal(18, (int)ObservationKind.EnemyAggro);
         Assert.Equal(19, (int)ObservationKind.PlayerContext);
-        Assert.Equal(Enumerable.Range(1, 19), Enum.GetValues<ObservationKind>().Select(k => (int)k));
+        // 20 is the kettle light kind (feat/kettle-light); 21 is the portal kind.
+        Assert.Equal(21, (int)ObservationKind.Portal);
+        Assert.Equal(Enumerable.Range(1, 19).Append(21), Enum.GetValues<ObservationKind>().Select(k => (int)k));
     }
 }
