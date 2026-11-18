@@ -27,7 +27,8 @@ The plugin polls every 0.5 s, moves the file to `done/` and writes `results/<id>
 | scanList | max | lists candidates to `<id>-list.txt` |
 | scanWatch | max or addresses, seconds | logs values once a second to `<id>-watch.txt` |
 | scanWatchStop | | stops the watch |
-| scanOwner | address, depth (4), maxOffset (0x400), maxPerLevel, maxChains | reverse pointer scan to the game module's static data or a ClientStructs struct (Framework, UIModule, AgentModule, each agent, AtkStage) |
+| scanOwner | address, depth (4), maxOffset (0x400), maxPerLevel, maxChains, roots ("structs" checks the scanStructs structs first, one or two hops, and skips the heap walk when it finds a chain; generic:true runs it anyway), timeLimit (seconds, default 60; partial results), objectBytes | reverse pointer scan to the game module's static data or a ClientStructs struct (Framework, UIModule, AgentModule, each agent, AtkStage) |
+| scanStructs | address | base, size and the pointer fields near the address (window target-0x2000 to target+0x200) of EventFramework, the active content director (and as the Eureka director), UIState, AgentModule, Eureka/Elemental/Magia/Content/ToDo agents and the _ToDoList window, to `<id>-structs.txt` |
 | scanResolve | start (address or module+0xRVA), offsets, type | follows a saved chain now and reads the value |
 | scanAddons | filter | names of loaded UI windows |
 | scanAddon | name | text and counter nodes of an open window plus the owning agent's raw ints |

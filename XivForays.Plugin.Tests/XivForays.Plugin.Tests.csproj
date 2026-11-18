@@ -40,7 +40,7 @@
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
     <ItemGroup Condition="'$(DevScanner)' == 'true'">
-        <Compile Include="..\XivForays.Plugin\Dev\ScanCore.cs;..\XivForays.Plugin\Dev\PointerScan.cs;..\XivForays.Plugin\Dev\ScannerController.cs" Link="Plugin\Dev\%(Filename)%(Extension)" />
+        <Compile Include="..\XivForays.Plugin\Dev\ScanCore.cs;..\XivForays.Plugin\Dev\PointerScan.cs;..\XivForays.Plugin\Dev\ScannerController.cs;..\XivForays.Plugin\Dev\StructProbe.cs" Link="Plugin\Dev\%(Filename)%(Extension)" />
     </ItemGroup>
 
     <ItemGroup Condition="Exists('$(LuminaDir)Lumina.dll') And Exists('$(LuminaDir)Lumina.Excel.dll')">

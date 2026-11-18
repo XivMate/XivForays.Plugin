@@ -13,11 +13,11 @@ namespace XivMate.DataGathering.Forays.Dalamud.Dev;
 /// every command returns at once and the outcome goes to the status and to a text file in the output folder.
 /// </summary>
 internal sealed class ScannerController(IScanMemory memory, Func<ModuleRange?> module, Func<IReadOnlyList<KnownRoot>> roots,
-    string defaultOutDir, Action<string> log, Throttle? throttle = null) : IDisposable
+    string defaultOutDir, Action<string> log, Throttle? throttle = null, Func<IReadOnlyList<KnownRoot>>? structs = null) : IDisposable
 {
     public static readonly IReadOnlySet<string> Known = new HashSet<string>(StringComparer.Ordinal)
     {
-        "scanFirst", "scanNext", "scanList", "scanWatch", "scanWatchStop", "scanOwner", "scanResolve", "scanStop", "scanReset", "scanStatus",
+        "scanFirst", "scanNext", "scanList", "scanWatch", "scanWatchStop", "scanOwner", "scanResolve", "scanStructs", "scanStop", "scanReset", "scanStatus",
     };
 
     private readonly Throttle pace = throttle ?? new Throttle();
@@ -69,6 +69,8 @@ internal sealed class ScannerController(IScanMemory memory, Func<ModuleRange?> m
                 return StartOwner(id, args, outDir);
             case "scanResolve":
                 return Resolve(args);
+            case "scanStructs":
+                return Structs(id, args, outDir);
             default:
                 throw new InvalidOperationException($"unknown scanner command {cmd}");
         }
@@ -229,21 +231,59 @@ internal sealed class ScannerController(IScanMemory memory, Func<ModuleRange?> m
         var maxOffset = (uint)(Number(args, "maxOffset") ?? 0x400);
         var perLevel = (int)(Number(args, "maxPerLevel") ?? 20000);
         var maxChains = (int)(Number(args, "maxChains") ?? 200);
+        var structRoots = string.Equals(args["roots"]?.GetValue<string>(), "structs", StringComparison.OrdinalIgnoreCase);
+        var seconds = Number(args, "timeLimit") ?? 60;
+        var objectBytes = (int)(Number(args, "objectBytes") ?? 0x2000);
+        var alsoGeneric = args["generic"] is JsonValue g && g.TryGetValue<bool>(out var gv) && gv;
         Run("scanOwner", cancel =>
         {
-            var result = new PointerScanner(memory, pace).Scan(target, depth, maxOffset, perLevel, maxChains, module(), roots(), cancel,
-                p => progress = p);
-            lastChains = result.Chains.ToList();
-            lastOutcome = $"owner scan of 0x{target:X}: {result.Chains.Count} chains";
+            var deadline = DateTime.UtcNow.AddSeconds(seconds);
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            limit.CancelAfter(TimeSpan.FromSeconds(seconds));
+            var found = new List<PointerChain>();
+            var notes = new List<string>();
+            if (structRoots)
+            {
+                var near = StructProbe.Chains(memory, (structs ?? (() => []))(), target, maxOffset, 2, objectBytes, deadline, maxChains);
+                found.AddRange(near);
+                notes.Add($"known structs first (one or two hops): {near.Count} chains");
+            }
+            if (!structRoots || found.Count == 0 || alsoGeneric)
+            {
+                var result = new PointerScanner(memory, pace).Scan(target, depth, maxOffset, perLevel, maxChains, module(), roots(), limit.Token,
+                    p => progress = p);
+                found.AddRange(result.Chains);
+                notes.AddRange(result.Notes);
+            }
+            else
+                notes.Add("generic heap walk skipped because a struct chain was found (pass generic:true to run it anyway)");
+            var partial = limit.IsCancellationRequested;
+            if (partial && !cancel.IsCancellationRequested)
+                notes.Add($"time limit of {seconds} s reached: partial results");
+            lastChains = found;
+            lastOutcome = $"owner scan of 0x{target:X}: {found.Count} chains{(partial ? " (partial)" : "")}";
             log($"[scanner] {lastOutcome}");
             var text = new StringBuilder()
-                .AppendLine($"owner scan of 0x{target:X}, depth {depth}, maxOffset 0x{maxOffset:X}")
-                .AppendLine(string.Join(Environment.NewLine, result.Notes))
+                .AppendLine($"owner scan of 0x{target:X}, depth {depth}, maxOffset 0x{maxOffset:X}, roots {(structRoots ? "structs" : "generic")}")
+                .AppendLine(string.Join(Environment.NewLine, notes))
                 .AppendLine("Each chain: start at the module+RVA (or the named struct field), read the pointer there, add the offset, repeat; the last address is the value.")
-                .AppendLine(ChainResolver.Format(result.Chains, maxChains));
+                .AppendLine(ChainResolver.Format(found, maxChains));
             WriteText(outDir, $"{id}-owner.txt", text.ToString());
         });
         return new { started = "scanOwner", address = $"0x{target:X}", depth, maxOffset };
+    }
+
+    private object Structs(string id, JsonObject args, string outDir)
+    {
+        var target = args["address"] is { } a ? ParseAddress(a.ToString()) : throw new InvalidOperationException("pass \"address\"");
+        var list = (structs ?? (() => []))();
+        WriteText(outDir, $"{id}-structs.txt", StructProbe.Describe(memory, list, target));
+        return new
+        {
+            file = Path.Combine(outDir, $"{id}-structs.txt"), structs = list.Count,
+            inside = list.Count(r => StructProbe.Inside(r, target, StructProbe.DefaultBelow, out _)),
+            withPointers = list.Count(r => StructProbe.FindFields(StructProbe.ReadStruct(memory, r), target).Count > 0),
+        };
     }
 
     /// <summary>
