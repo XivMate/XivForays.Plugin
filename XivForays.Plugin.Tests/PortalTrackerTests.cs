@@ -156,4 +156,38 @@ public class PortalTrackerTests
         Assert.DoesNotContain("123456789", json);
         Assert.DoesNotContain("name", names, StringComparer.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void DrawRangeFlickerAtTheSamplingRateGivesOneAppearAndOneGone()
+    {
+        var tracker = new PortalTracker();
+        var emitted = new List<Observation>();
+        // 250 ms ticks; the node drops out of the table for 1 s twice while it is up, then leaves for good.
+        for (var tick = 0; tick < 200; tick++)
+        {
+            var ms = tick * 250L;
+            var inTable = ms < 20_000 && !(ms is >= 5_000 and < 6_000) && !(ms is >= 11_000 and < 12_000);
+            var context = At(0) with { ObservedAtMs = Start + ms };
+            tracker.Sample(context, inTable ? new[] { Blue() } : Array.Empty<PortalSnapshot>(), emitted.Add);
+        }
+
+        Assert.Equal(1, emitted.Count(o => o.State == 1));
+        Assert.Equal(1, emitted.Count(o => o.State == 0));
+        Assert.Equal(emitted[0].ObjectTrackId, emitted[1].ObjectTrackId);
+    }
+
+    [Fact]
+    public void SignalTickCallsSamplePortals()
+    {
+        // Guard against the recorder going dead again: SamplePortals must be invoked from the sampling loop.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "XivForays.Plugin", "Gathering", "ForaySignalModule.cs")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "XivForays.Plugin", "Gathering", "ForaySignalModule.cs"));
+        var start = source.IndexOf("private void SignalTick()", StringComparison.Ordinal);
+        var end = source.IndexOf("private void SamplePortals(", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        Assert.Contains("SamplePortals(context);", source.Substring(start, end - start));
+    }
 }

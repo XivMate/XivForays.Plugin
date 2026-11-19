@@ -393,6 +393,7 @@ internal sealed partial class ForaySignalModule(
             }
 
             SampleTreasure(context);
+            SamplePortals(context);
             if (ForayZones.HasCriticalEngagements(context.TerritoryId))
                 SampleEncounters(context);
             LightTick(context, player.Position);
