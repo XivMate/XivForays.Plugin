@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Dev;
 
-// Dev-only, READ-ONLY value scanner (job 2327J). It only ever reads the game's own memory: VirtualQuery to list
+// Dev-only, READ-ONLY value scanner. It only ever reads the game's own memory: VirtualQuery to list
 // committed read-write private / image-data regions, ReadProcessMemory to copy bytes out. There is no write method
 // anywhere in this folder, no hook and no pointer is ever dereferenced directly.
 

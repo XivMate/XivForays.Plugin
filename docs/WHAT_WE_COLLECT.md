@@ -28,7 +28,7 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
   "nothing dropped" can be told apart from "not recording".
 - **Your own foray state:** your position every 30 seconds, job and level, elemental/knowledge level, the magia board,
   the chain timer, whether you are dead or mounted, and a short list of foray buffs (sprint, sneak, logos/lost/phantom
-  actions, food, raise/weakness) and, from the next release, your Eureka EXP buffs (Elemental EXP Up,
+  actions, food, raise/weakness) and, from 0.0.0.18, your Eureka EXP buffs (Elemental EXP Up,
   Elemental Blessing, Elemental Harmony).
 - **Eureka light gains (Pagos, Pyros):** each time the kettle gets light, the kind of light message, the kettle's
   value before and after (read from game memory, read only), the kill that caused it, your chain, your party as
@@ -38,7 +38,7 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
   foray level as the party list shows it: in Eureka their elemental level, the level they are synced to and whether
   they are synced; in Bozja and Zadnor their resistance rank; in the Occult Crescent their knowledge level and the
   level they are synced to.
-- **Context:** zone, the world (server) you are on, weather (the weather calculated from the time and the zone's weather table, plus the weather your game is showing, which can differ), game version, plugin version and times.
+- **Context:** zone, map, weather, game version, plugin version and times. Weather is sent as two numbers: the weather worked out from the time and the zone's weather table (`weatherId`), and the weather your game is showing (`shownWeatherId`). They normally match; they differ when the game overrides the sky, for example while a Hydatos notorious monster is up. Your world (server) is not sent.
 
 ## What it never sends
 

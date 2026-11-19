@@ -10,7 +10,7 @@ using XivMate.DataGathering.Forays.Dalamud.Services;
 
 namespace XivMate.DataGathering.Forays.Dalamud.Gathering;
 
-// Kind 22 light gain and kind 23 notice net (job 1830). The light amount is not in the chat message, so the kettle value is
+// Kind 22 light gain and kind 23 notice net. The light amount is not in the chat message, so the kettle value is
 // read from game memory (read only, same path and guard as docs/KETTLE_LIGHT.md) at every 1 s sample and about 1 s after
 // each light notice. Everything the record carries is a number; no names, ids or text.
 internal sealed partial class ForaySignalModule

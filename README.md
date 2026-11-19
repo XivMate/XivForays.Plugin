@@ -12,7 +12,7 @@ An opt-in, passive Dalamud plugin that contributes world observations from Eurek
    https://github.com/XivMate/XivForays/releases/latest/download/repo.json
    ```
 
-3. Open `/xlplugins`, find **XivMate Foray Data Gathering** and choose **Install**. Use a Dalamud build that supports API 15 for version 0.0.0.14.
+3. Open `/xlplugins`, find **XivMate Foray Data Gathering** and choose **Install**. Use a Dalamud build that supports API 15 (version 0.0.0.18).
 4. Get your own API key from the maintainer or the [Forays site](https://web.xivforays.com/). Enter it in the first-run window or under **System** in `/xivforays config`. Keep the default API URL `https://web.xivforays.com/api/forays/`. Enable **Crowdsource data** in **General** when you want to contribute.
 
 To update, open `/xlplugins` and install the available update. Keep the same repository URL. If you previously loaded a developer copy or used an older repository entry for this plugin, remove that entry before installing from the Friends feed.

@@ -7,7 +7,7 @@ using Xunit;
 
 namespace XivForays.Plugin.Tests;
 
-/// <summary>Developer-only scanner (job 2327J): runs only with -p:DevScanner=true. Fake memory, no game.</summary>
+/// <summary>Developer-only scanner: runs only with -p:DevScanner=true. Fake memory, no game.</summary>
 public sealed class DevScannerTests
 {
     private const ulong Base = 0x1_0000_0000;

@@ -368,5 +368,5 @@ public class DropLinkingTests
     }
 
     [Fact]
-    public void CaptureRevisionIsFourForDropLinking() => Assert.Equal(4, ContextRules.CaptureRevision);
+    public void CaptureRevisionIsFiveForTheLightRelease() => Assert.Equal(5, ContextRules.CaptureRevision);
 }
