@@ -1,10 +1,10 @@
-# Pose capture design (v2 poses), for Jake's OK
+# Pose capture design (v2 poses), for the maintainer's OK
 
 Status: DESIGN ONLY (task 2026-11-08-0200, narrowed by addendum 0205, extended by addendum 0210 "record everything
-raw + aggro events"). Nothing in this branch changes plugin or web code. Jake's v2 spec is the project doc;
+raw + aggro events"). Nothing in this branch changes plugin or web code. The maintainer's v2 spec is the project doc;
 `docs/CAPTURE_SPEC.md` here is still the committed baseline and is unchanged. Built on `feature/friends-release` @ 87c1292 (0.0.0.12 + FATE end). Web reference: master @ 31d54d2 (PR 164).
 
-Goal: one full re-capture pass by Jake of every enemy at every spawn point, recording the client's SETTLED truth
+Goal: one full re-capture pass by the maintainer of every enemy at every spawn point, recording the client's SETTLED truth
 (ground height, skeleton-root tilt, scales, model, timelines) that ACT never sees, plus form changes and idle
 behaviour, so the Imaging plugin can place copies exactly (pack_snapshots v2) instead of reconstructing tilt.
 
@@ -48,7 +48,7 @@ FFXIVClientStructs.xml. What they mean for foray mobs is unverified, so they are
 | Cast | `CastInfo` (action id/type, progress, total) | Enemy casts at aggro. |
 | HP | `Health`, `MaxHealth` | |
 | Aggro type | **no client field** | Aggro (sight/sound/proximity/magic/blood) is server-side. The client sheets have BNpcBase `Behavior`, `Battalion`, `LinkRace` (assist group), `IsOmnidirectional`, `Rank`, `Special` and unnamed `Unknown*` columns. These are joined OFFLINE by bnpcId: 0 bytes in the plugin. So aggro type is INFERRED from aggro events (§2b). |
-| Line of sight | `BGCollision` `Raycast` exists | A game function CALL, not a pure memory read. Proposed **off** in the distributed build and only as an opt-in for the capture pass, if Jake wants it. Otherwise the export infers it from height/terrain offline. |
+| Line of sight | `BGCollision` `Raycast` exists | A game function CALL, not a pure memory read. Proposed **off** in the distributed build and only as an opt-in for the capture pass, if the maintainer wants it. Otherwise the export infers it from height/terrain offline. |
 
 Not feasible in a distributed plugin: true server position (packet hook), navmesh ground (vnavmesh is Imaging-only),
 anything that writes memory, a "killer" (the client has no killer field: see §2b).
@@ -118,7 +118,7 @@ enemyStatuses[], player: { moving, speed (y/s over the last scan), sprinting, mo
 targetCategory], ...]` (other enemies that entered combat within ±1.5 s and 40 y). The time, ET and weather come from
 the record context. The player's statuses are NOT sent raw: only the allow-listed flags (Sprint, Sneak/Stealth/Hide/
 Invisible/"Lost Stealth", Mounted), resolved by English sheet name like Mutation/Adaptation now. `jobRole` (tank/
-healer/dps, aggro-relevant) is optional, and off unless Jake wants it.
+healer/dps, aggro-relevant) is optional, and off unless the maintainer wants it.
 
 Purpose: the offline export classifies each enemy's aggro type. Sight = aggro only within the facing cone and never
 from behind. Sound = aggro from behind, gated by `moving`/`speed`. Proximity = from any angle at short range. Magic =
@@ -235,7 +235,7 @@ That is well inside the batch limits (256 records, 512 KB request): about 1 batc
   (15+16+17 windows) and `PoseVersions24h` to `IngestStatus` and a row on `forays-status.html`.
 - Tests: the contract HTTP round trip for kinds 15–17 with unknown fields, the invalid-pose → null rule, the Mongo
   container test for the status counter.
-- Deploy needs: Jake's OK, merge PR → Azure pipeline → app service. No Mongo migration; index creation runs at
+- Deploy needs: the maintainer's OK, merge PR → Azure pipeline → app service. No Mongo migration; index creation runs at
   startup.
 
 ## 6. pack_snapshots v2 (export for Imaging)
@@ -271,9 +271,9 @@ key, so Imaging can also place a single enemy at any exact spawn point.
 - Site: a 5th Field work list "Pose coverage · v2" (developer build only), rows = enemy × form × spawn point NOT
   captured, grouped by camp. The existing Spawns now / next / all filter covers night-only and weather-locked mobs.
   The map shows missing points hollow and captured ones solid, with a header like "Anemos 212 / 340 spawn points
-  posed". The existing done-storage lets Jake tick off camps by hand.
+  posed". The existing done-storage lets the maintainer tick off camps by hand.
 - Freshness: one pipeline run (minutes) between sessions. During a session the plugin's Debug tab shows "poses this
-  visit" (count + the last 10 bnpcIds + flags), so Jake knows a camp is done before he leaves it.
+  visit" (count + the last 10 bnpcIds + flags), so the maintainer knows a camp is done before he leaves it.
 
 ## 8. 15-minute trial plan
 
@@ -281,7 +281,7 @@ Build: `feature/pose-capture` TRIAL build (items 1 + 3 + raw state + aggro event
 idle tracks, no raycast), dev DLL in `bin\x64\Release`
 (Dalamud reloads it). Each pose also writes one summary line to dalamud.log (`[XivForays.Plugin] pose 15 bnpc 7777
 layout 4012345 near 1 tilt 9.9 dy -0.358`, no names), and the Debug tab gets a "poses" table. So the trial is
-verifiable even before the ingest deploy. If Jake OKs the ingest deploy first, /status shows `PoseRecords` too.
+verifiable even before the ingest deploy. If the maintainer OKs the ingest deploy first, /status shows `PoseRecords` too.
 
 1. (0–2 min) Reload check: the Debug tab shows the pose table, no warnings in the log.
 2. (2–6 min) Stand 40–80 y from a sloped camp (Squibs), out of aggro, without moving. Expect one pose per camp member
