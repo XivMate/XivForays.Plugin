@@ -434,6 +434,11 @@ internal static class ConditionCheck
         return hour is < 6 or >= 18;
     }
 
+    /// <summary>The weather a spawn condition is judged against: the zone's calculated forecast, falling back to the shown
+    /// weather only outside the Eureka field zones. The shown weather is overridden while the Hydatos Ovni NM is up, so it
+    /// must not decide whether a weather enemy can be up.</summary>
+    public static string? WeatherFor(uint territory, long unixMs, string? shown) => EorzeaClock.WeatherAt(territory, unixMs) ?? shown;
+
     public static string Normalize(string weather)
     {
         var w = weather.Trim().ToLowerInvariant();

@@ -378,7 +378,7 @@ internal sealed class CollectorOverlayService : IDisposable
     {
         if (!conditionStates.TryGetValue(point.Condition, out var state))
         {
-            state = ConditionCheck.Evaluate(point.Condition, WeatherName(), night, activeFates);
+            state = ConditionCheck.Evaluate(point.Condition, ConditionCheck.WeatherFor(territory, unixNow, WeatherName()), night, activeFates);
             if (conditionStates.Count < 256)
                 conditionStates[point.Condition] = state;
         }

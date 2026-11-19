@@ -74,5 +74,28 @@ public class CalculatedWeatherSheetTests
             Assert.Equal(ConditionCheck.Normalize(EorzeaClock.WeatherAt(ForayZones.EurekaHydatos, ms)!), ConditionCheck.Normalize(name));
         }
     }
+    // The overlay judges "weather Snow" enemies against the calculated forecast, not the shown weather (Ovni overrides it).
+    [Theory]
+    [InlineData(1800000000123L, "Snow")]
+    [InlineData(1763060000000L, "Gloom")]
+    [InlineData(1763100000000L, "Thunderstorms")]
+    public void SpawnConditionsUseTheCalculatedWeatherEvenWhenTheShownWeatherIsOverridden(long ms, string expected)
+    {
+        Assert.Equal(expected, ConditionCheck.WeatherFor(827, ms, "Ovni"));
+        Assert.Equal(expected, ConditionCheck.WeatherFor(827, ms, null));
+    }
+
+    [Fact]
+    public void SnowConditionHoldsInSnowEvenWhileTheGameShowsAnotherWeather()
+    {
+        var weather = ConditionCheck.WeatherFor(827, 1800000000123L, "Showers");
+        Assert.Equal(ConditionState.Available, ConditionCheck.Evaluate("weather Snow", weather, false, null));
+        var gloom = ConditionCheck.WeatherFor(827, 1763060000000L, "Snow");
+        Assert.Equal(ConditionState.Unavailable, ConditionCheck.Evaluate("weather Snow", gloom, false, null));
+    }
+
+    [Fact]
+    public void OutsideTheFieldZonesTheShownWeatherIsUsed() =>
+        Assert.Equal("Rain", ConditionCheck.WeatherFor(132, 1800000000123L, "Rain"));
 }
 #endif
