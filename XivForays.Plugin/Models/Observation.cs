@@ -66,7 +66,10 @@ internal sealed record Observation
     public Guid VisitId { get; init; }
     public uint TerritoryId { get; init; }
     public uint MapId { get; init; }
+    /// <summary>Calculated weather (UTC time and the zone's weather rate table), not the client's displayed weather.</summary>
     public byte? WeatherId { get; init; }
+    /// <summary>The weather the client is showing; differs from WeatherId when the game overrides it (Hydatos Ovni NM).</summary>
+    public byte? ShownWeatherId { get; init; }
     public uint? PlayerElementalLevel { get; init; }
     public uint? PlayerEffectiveElementalLevel { get; init; }
     public bool? PlayerElementalSynced { get; init; }

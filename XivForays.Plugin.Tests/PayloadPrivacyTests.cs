@@ -19,6 +19,7 @@ public class PayloadPrivacyTests
         TerritoryId = 827,
         MapId = 520,
         WeatherId = 3,
+        ShownWeatherId = 2,
         PlayerElementalLevel = 60,
         PlayerEffectiveElementalLevel = 60,
         PlayerElementalSynced = false
@@ -84,7 +85,7 @@ public class PayloadPrivacyTests
         string[] allowed =
         [
             "kind", "mapId", "observedAtMs", "playerEffectiveElementalLevel", "playerElementalLevel",
-            "playerElementalSynced", "territoryId", "visitId", "weatherId", "x", "y", "z"
+            "playerElementalSynced", "shownWeatherId", "territoryId", "visitId", "weatherId", "x", "y", "z"
         ];
         Assert.Equal(allowed.Order(), keys);
         Assert.Equal(14, document.RootElement.GetProperty("kind").GetInt32());

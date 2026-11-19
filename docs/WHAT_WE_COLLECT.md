@@ -38,7 +38,7 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
   foray level as the party list shows it: in Eureka their elemental level, the level they are synced to and whether
   they are synced; in Bozja and Zadnor their resistance rank; in the Occult Crescent their knowledge level and the
   level they are synced to.
-- **Context:** zone, the world (server) you are on, weather, game version, plugin version and times.
+- **Context:** zone, the world (server) you are on, weather (the weather calculated from the time and the zone's weather table, plus the weather your game is showing, which can differ), game version, plugin version and times.
 
 ## What it never sends
 

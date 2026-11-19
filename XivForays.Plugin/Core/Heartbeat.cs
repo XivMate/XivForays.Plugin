@@ -24,6 +24,7 @@ internal static class Heartbeat
         TerritoryId = context.TerritoryId,
         MapId = context.MapId,
         WeatherId = context.WeatherId,
+        ShownWeatherId = context.ShownWeatherId,
         PlayerElementalLevel = context.PlayerElementalLevel,
         PlayerEffectiveElementalLevel = context.PlayerEffectiveElementalLevel,
         PlayerElementalSynced = context.PlayerElementalSynced,
