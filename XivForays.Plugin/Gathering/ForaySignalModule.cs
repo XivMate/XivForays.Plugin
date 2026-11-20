@@ -401,6 +401,7 @@ internal sealed partial class ForaySignalModule(
 
     private const string FateRewardAddon = "FateReward";
     private string? lastRewardSignature;
+    private bool rewardReadFailed;
 
     private void OnRewardAddon(AddonEvent type, AddonArgs args)
     {
@@ -436,7 +437,11 @@ internal sealed partial class ForaySignalModule(
         }
         catch (Exception ex)
         {
-            log.Warning($"FATE reward reading failed ({ex.GetType().Name}).");
+            if (!rewardReadFailed)
+            {
+                rewardReadFailed = true;
+                log.Warning($"FATE reward reading failed ({ex.GetType().Name}); further failures are not logged.");
+            }
         }
     }
 
@@ -492,7 +497,8 @@ internal sealed partial class ForaySignalModule(
                 observations.Record(Heartbeat.Create(context, player.Position, gameVersion.Value, lootListening));
             }
 
-            ReadRewardWindow();
+            if (rewardTracker.WantsWindowRead(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+                ReadRewardWindow();
             SampleTreasure(context);
             SamplePortals(context);
             if (ForayZones.HasCriticalEngagements(context.TerritoryId))

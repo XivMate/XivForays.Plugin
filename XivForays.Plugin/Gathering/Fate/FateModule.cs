@@ -112,7 +112,7 @@ internal sealed class FateModule(
             observations.Record(observation);
             var id = observation.GameId ?? 0;
             if (observation.Kind == ObservationKind.FateEnded && forayService.IsContentEnabled(observation.TerritoryId))
-                NoteRewardEnd(observation, id, byId, legacy);
+                SafeNoteRewardEnd(observation, id, byId, legacy);
             switch (observation.Kind)
             {
                 case ObservationKind.FateStarted when byId.TryGetValue(id, out var fate):
@@ -123,6 +123,24 @@ internal sealed class FateModule(
                     break;
             }
         });
+    }
+
+    private bool rewardEndFailed;
+
+    private void SafeNoteRewardEnd(Observation end, uint id, Dictionary<uint, IFate> table, Dictionary<uint, Models.Fate> tracked)
+    {
+        try
+        {
+            NoteRewardEnd(end, id, table, tracked);
+        }
+        catch (Exception ex)
+        {
+            if (!rewardEndFailed)
+            {
+                rewardEndFailed = true;
+                log.Warning($"FATE reward end note failed ({ex.GetType().Name}); further failures are not logged.");
+            }
+        }
     }
 
     /// <summary>A FATE end (kind 7) starts a reward record (kind 24): its level, where the player stood, job and party size.</summary>

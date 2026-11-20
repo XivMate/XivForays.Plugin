@@ -532,4 +532,101 @@ public class FateRewardTests
         }));
         Assert.Contains("notReceived=[28x111r1]", FateRewardLog.Line(r));
     }
+
+    // ---- zones outside Eureka, missing or short windows, polling gate ----
+
+    private static Observation InZone(Observation o, uint territory) => o with { TerritoryId = territory };
+
+    [Theory]
+    [InlineData(763u, (byte)1)]   // Eureka Pagos
+    [InlineData(1252u, (byte)3)]  // Occult Crescent, South Horn
+    [InlineData(920u, (byte)2)]   // Bozjan Southern Front
+    [InlineData(975u, (byte)2)]   // Zadnor
+    [InlineData(612u, (byte)0)]   // an overworld zone
+    [InlineData(0u, (byte)0)]
+    public void TheZoneIsFlaggedAndNeverThrows(uint territory, byte flag)
+    {
+        var records = Run(t =>
+        {
+            t.NoteEnd(InZone(End(Louhi, T0), territory), 35, true, 37, 80, 1);
+            t.NoteWindow(InZone(Context(T0 + 400), territory), Window(Louhi, 0), 35, 37, 80, 1);
+            Pay(t, T0);
+        });
+        var r = Assert.Single(records);
+        Assert.Equal(flag, r.RewardZone);
+        Assert.Equal(territory, r.TerritoryId);
+    }
+
+    [Fact]
+    public void AnOverworldFateEndWithNoWindowAndNoItemsMakesNoRecord()
+    {
+        var records = Run(t => t.NoteEnd(InZone(End(Louhi, T0, FateOutcome.Failed), 612), 35, false, 37, 80, 1));
+        Assert.Empty(records);
+    }
+
+    [Fact]
+    public void ABozjaFateWithoutTheWindowKeepsTheNotices()
+    {
+        var records = Run(t =>
+        {
+            t.NoteEnd(InZone(End(Louhi, T0), 920), 35, true, 37, 80, 1);
+            Pay(t, T0);
+        });
+        var r = Assert.Single(records);
+        Assert.Equal(false, r.RewardWindowSeen);
+        Assert.Equal((byte)2, r.RewardZone);
+        Assert.Null(r.NotReceived);
+        Assert.Null(r.ReceivedNotInWindow);
+        Assert.Equal(2, r.ReceivedItems!.Length);
+    }
+
+    [Fact]
+    public void AWindowWithFewerRowsThanItemsReceivedMarksTheExtrasNotInWindow()
+    {
+        var records = Run(t =>
+        {
+            t.NoteEnd(InZone(End(Louhi, T0), 1252), 35, true, 37, 80, 1);
+            // The window lists only the lockbox; the notices also gave crystals and a card.
+            var slots = new List<RewardItem> { new(Lockbox, 9, 0), default, default, default, default };
+            t.NoteWindow(InZone(Context(T0 + 400), 1252),
+                RewardWindowRead.FromFields(Louhi, true, 0, 0, 0, 0, 0, slots, [default, default, default]), 35, 37, 80, 1);
+            Pay(t, T0);
+            t.NoteLoot(Loot(Card, 1, T0 + 1000));
+        });
+        var r = Assert.Single(records);
+        Assert.Empty(r.NotReceived!);
+        Assert.Equal(2, r.ReceivedNotInWindow!.Length);
+        Assert.Contains(r.ReceivedNotInWindow, i => i[0] == (int)Crystals && i[1] == 40);
+        Assert.Contains(r.ReceivedNotInWindow, i => i[0] == (int)Card && i[1] == 1);
+        Assert.Equal(3, r.ReceivedItems!.Length);
+    }
+
+    [Fact]
+    public void AWindowWithTooManyRowsIsRejectedWithoutThrowing()
+    {
+        var many = Enumerable.Range(1, 6).Select(i => new RewardItem((uint)i, 1, 0)).ToList();
+        var read = RewardWindowRead.FromFields(Louhi, true, 1, 0, 0, 0, 0, many, []);
+        Assert.False(read.IsPlausible);
+        var records = Run(t =>
+        {
+            t.NoteEnd(End(Louhi, T0), 35, true, 37, 80, 1);
+            t.NoteWindow(Context(T0 + 400), read, 35, 37, 80, 1);
+        });
+        var r = Assert.Single(records);
+        Assert.Equal(false, r.RewardWindowSeen);
+    }
+
+    [Fact]
+    public void TheWindowIsOnlyPolledAfterAFateThePlayerStoodInHasEnded()
+    {
+        var t = new FateRewardTracker();
+        Assert.False(t.WantsWindowRead(T0));
+        t.NoteEnd(End(Louhi, T0), 35, false, 37, 80, 1); // outside the circle: no polling
+        Assert.False(t.WantsWindowRead(T0 + 1000));
+        t.NoteEnd(End(Willows, T0), 35, true, 37, 80, 1);
+        Assert.True(t.WantsWindowRead(T0 + 1000));
+        Assert.False(t.WantsWindowRead(T0 + 20_000)); // reward period over
+        t.NoteWindow(Context(T0 + 400), Window(Willows, 0), 35, 37, 80, 1);
+        Assert.False(t.WantsWindowRead(T0 + 1000)); // window already read
+    }
 }

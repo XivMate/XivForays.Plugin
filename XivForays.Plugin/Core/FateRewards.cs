@@ -132,6 +132,13 @@ internal sealed class FateRewardTracker
 
     public int PendingCount => pending.Count;
 
+    /// <summary>
+    /// True only while a FATE the player stood inside has just ended and its window has not been read yet (inside the
+    /// reward period). The reward window is read by polling only then; otherwise only the game's own addon events read it.
+    /// </summary>
+    public bool WantsWindowRead(long nowMs) =>
+        pending.Values.Any(p => p.End != null && p.InsideRadius == true && p.Window == null && nowMs < Due(p));
+
     /// <summary>A loot record that can be a FATE reward item: it follows no kill. (A drop linked to a kill is a monster drop.)</summary>
     public static bool IsRewardLoot(Observation record) =>
         record.Kind == ObservationKind.Loot && record.DefeatTrackId == null;
@@ -308,6 +315,11 @@ internal sealed class FateRewardTracker
             emit(record);
     }
 
+    /// <summary>Which kind of zone the FATE was in: 1 Eureka, 2 Bozja or Zadnor, 3 Occult Crescent, 0 anything else.</summary>
+    public static byte ZoneFlag(uint territory) =>
+        ForayZones.IsEureka(territory) ? (byte)1 : ForayZones.IsBozja(territory) ? (byte)2
+        : ForayZones.IsOccultCrescent(territory) ? (byte)3 : (byte)0;
+
     /// <summary>
     /// The record, or null when this FATE gave the player nothing to report (not their FATE, or a failed one): needs
     /// the window with a success or a listed item, or a received item, or a successful end with the player inside the
@@ -328,8 +340,13 @@ internal sealed class FateRewardTracker
 
         int[][]? notReceived = null;
         int[][]? currencyPaid = null;
+        int[][]? notInWindow = null;
         if (window != null)
         {
+            // Items the notices gave that the window does not list at all (a longer or different window than the rows read).
+            var listedIds = window.Items.Select(i => i.ItemId).Concat(window.ExtraItems.Select(i => i.ItemId)).ToHashSet();
+            notInWindow = p.Received.Where(r => !listedIds.Contains(r.ItemId)).GroupBy(r => r.ItemId)
+                .Select(g => new[] { (int)g.Key, (int)Math.Min(int.MaxValue, g.Sum(r => (long)r.Quantity)) }).ToArray();
             // Currency rows (the window's left side, flag 64) are paid straight into the currency: received unless
             // the "cannot carry any more" notice names that currency. Item rows are received only by a notice.
             var currency = window.Items.Where(i => i.IsCurrency).GroupBy(i => i.ItemId)
@@ -387,6 +404,8 @@ internal sealed class FateRewardTracker
             ReceivedItems = received,
             NotReceived = notReceived,
             CurrencyPaid = currencyPaid,
+            ReceivedNotInWindow = notInWindow,
+            RewardZone = ZoneFlag(p.Context.TerritoryId),
             InventoryFullNotices = (byte)Math.Min(fullCount, byte.MaxValue),
             OverlapCount = (byte)Math.Min(overlap, byte.MaxValue)
         };

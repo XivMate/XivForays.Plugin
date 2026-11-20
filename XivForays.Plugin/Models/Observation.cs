@@ -382,6 +382,12 @@ internal sealed record Observation
     /// <summary>Kind 24: the window's currency rows (left side, flag 64, e.g. tomestones) paid straight into the currency, taken as received unless capped: [[itemId, amount]].</summary>
     public int[][]? CurrencyPaid { get; init; }
 
+    /// <summary>Kind 24: items the notices gave that the reward window does not list: [[itemId, quantity]]. Present only when the window was read.</summary>
+    public int[][]? ReceivedNotInWindow { get; init; }
+
+    /// <summary>Kind 24: zone kind of the FATE: 1 Eureka, 2 Bozja or Zadnor, 3 Occult Crescent, 0 other.</summary>
+    public byte? RewardZone { get; init; }
+
     /// <summary>Kind 24: how many "inventory full" notices came in the reward period.</summary>
     public byte? InventoryFullNotices { get; init; }
 
