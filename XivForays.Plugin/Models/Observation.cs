@@ -48,7 +48,10 @@ internal enum ObservationKind
     LightGain = 22,
 
     /// <summary>Discovery net (Eureka zones): a LogMessage row id with its integer parameters. Numbers only, throttled and deduped.</summary>
-    Notice = 23
+    Notice = 23,
+
+    /// <summary>One FATE reward for the local player (0.0.0.19): rank and listed rewards from the game's reward window, every item received from the "You obtain" notices, the FATE level, the player's level and job, and the party size. Numbers only. See docs/CAPTURE_SPEC.md.</summary>
+    FateReward = 24
 }
 
 /// <summary>FATE result on FateEnded: from the end state (Ended/Failed), else from the last progress (100 = success).</summary>
@@ -319,4 +322,75 @@ internal sealed record Observation
 
     /// <summary>Kind 22: Eureka EXP needed after.</summary>
     public uint? GainExperienceNeededAfter { get; init; }
+
+    // FATE reward (kind 24). Numbers only: no FATE name, no player name or id. Also uses gameId (the FATE id), outcome,
+    // outcomeInferred, startedAt (the FATE's game start), groupSize, playerElementalLevel / playerEffectiveElementalLevel
+    // (from the shared context), x / y / z (the FATE centre) and observedAtMs (the FATE end, or the window when no end was seen).
+
+    /// <summary>Kind 24: the FATE's level (FateContext.Level), absent when the FATE was never read.</summary>
+    public byte? FateLevel { get; init; }
+
+    /// <summary>Kind 24: the player's own job (ClassJob row id) at the end.</summary>
+    public byte? PlayerClassJobId { get; init; }
+
+    /// <summary>Kind 24: the player's own job level at the end.</summary>
+    public byte? PlayerJobLevel { get; init; }
+
+    /// <summary>Kind 24: participation rank from the reward window: 1 gold, 2 silver, 3 bronze, 4 critical engagement. Absent when no window was read or its medal value was not 0 to 3 (see <see cref="RewardMedalRaw"/>).</summary>
+    public byte? RewardRank { get; init; }
+
+    /// <summary>Kind 24: the window's medal field exactly as the game holds it, so a rank can be re-derived later.</summary>
+    public uint? RewardMedalRaw { get; init; }
+
+    /// <summary>Kind 24: the reward window data was read (the list of rewards and the rank are then present).</summary>
+    public bool? RewardWindowSeen { get; init; }
+
+    /// <summary>Kind 24: the FATE was seen reaching its end in the FATE table.</summary>
+    public bool? RewardEndSeen { get; init; }
+
+    /// <summary>Kind 24: the player stood inside the FATE radius when it ended (a proxy for taking part).</summary>
+    public bool? InsideFateRadius { get; init; }
+
+    /// <summary>Kind 24: ms from the FATE end to the window read (negative when the window came first).</summary>
+    public int? WindowAfterEndMs { get; init; }
+
+    /// <summary>Kind 24: experience shown in the window.</summary>
+    public uint? RewardExperience { get; init; }
+
+    /// <summary>Kind 24: the window's flag byte for the experience line, raw.</summary>
+    public byte? RewardExperienceFlags { get; init; }
+
+    /// <summary>Kind 24: the window's currency amount (gil or similar), raw.</summary>
+    public uint? RewardCurrency { get; init; }
+
+    /// <summary>Kind 24: items listed in the window: [[itemId, amount, flags]].</summary>
+    public int[][]? RewardItems { get; init; }
+
+    /// <summary>Kind 24: the window's additional (bonus) item rows: [[itemId, amount]].</summary>
+    public int[][]? RewardExtraItems { get; init; }
+
+    /// <summary>Kind 24: every item the "You obtain" notices gave in the reward period: [[itemId, total quantity, notices]].</summary>
+    public int[][]? ReceivedItems { get; init; }
+
+    /// <summary>
+    /// Kind 24: window items (or amounts) not received: [[itemId, missing quantity, reason]]. Reason 1 capped ("You cannot
+    /// carry any more [item]." for that item), 2 inventory full, 3 unique already owned, 4 unknown (no notice explains it).
+    /// Currency rows (window left side) appear here only with reason 1.
+    /// </summary>
+    public int[][]? NotReceived { get; init; }
+
+    /// <summary>Kind 24: the window's currency rows (left side, flag 64, e.g. tomestones) paid straight into the currency, taken as received unless capped: [[itemId, amount]].</summary>
+    public int[][]? CurrencyPaid { get; init; }
+
+    /// <summary>Kind 24: items the notices gave that the reward window does not list: [[itemId, quantity]]. Present only when the window was read.</summary>
+    public int[][]? ReceivedNotInWindow { get; init; }
+
+    /// <summary>Kind 24: zone kind of the FATE: 1 Eureka, 2 Bozja or Zadnor, 3 Occult Crescent, 0 other.</summary>
+    public byte? RewardZone { get; init; }
+
+    /// <summary>Kind 24: how many "inventory full" notices came in the reward period.</summary>
+    public byte? InventoryFullNotices { get; init; }
+
+    /// <summary>Kind 24: how many other FATE completions were in their reward period at the same time (0 = none).</summary>
+    public byte? OverlapCount { get; init; }
 }

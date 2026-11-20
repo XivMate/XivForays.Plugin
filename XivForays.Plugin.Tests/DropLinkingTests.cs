@@ -368,5 +368,5 @@ public class DropLinkingTests
     }
 
     [Fact]
-    public void CaptureRevisionIsFiveForTheLightRelease() => Assert.Equal(5, ContextRules.CaptureRevision);
+    public void CaptureRevisionIsSixForTheFateRewardRecord() => Assert.Equal(6, ContextRules.CaptureRevision);
 }

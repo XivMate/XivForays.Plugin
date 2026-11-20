@@ -19,7 +19,10 @@ internal sealed class FateModule(
     ApiService api,
     ForayService forayService,
     ObservationService observations,
-    FateRewardWindow fateRewards) : IModule
+    FateRewardWindow fateRewards,
+    FateRewardTracker rewardTracker,
+    PlayerContextSampler playerContext,
+    IPartyList partyList) : IModule
 {
     private readonly FateLifecycle lifecycle = new();
     // Legacy FATE-end route records (name, level) for the FATEs the lifecycle is tracking.
@@ -50,6 +53,7 @@ internal sealed class FateModule(
             scheduler.CancelScheduledTask(FateUpload);
             lifecycle.Clear();
             legacy.Clear();
+            rewardTracker.Clear();
             queue = new();
         }
     }
@@ -107,6 +111,8 @@ internal sealed class FateModule(
         {
             observations.Record(observation);
             var id = observation.GameId ?? 0;
+            if (observation.Kind == ObservationKind.FateEnded && forayService.IsContentEnabled(observation.TerritoryId))
+                SafeNoteRewardEnd(observation, id, byId, legacy);
             switch (observation.Kind)
             {
                 case ObservationKind.FateStarted when byId.TryGetValue(id, out var fate):
@@ -117,6 +123,41 @@ internal sealed class FateModule(
                     break;
             }
         });
+    }
+
+    private bool rewardEndFailed;
+
+    private void SafeNoteRewardEnd(Observation end, uint id, Dictionary<uint, IFate> table, Dictionary<uint, Models.Fate> tracked)
+    {
+        try
+        {
+            NoteRewardEnd(end, id, table, tracked);
+        }
+        catch (Exception ex)
+        {
+            if (!rewardEndFailed)
+            {
+                rewardEndFailed = true;
+                log.Warning($"FATE reward end note failed ({ex.GetType().Name}); further failures are not logged.");
+            }
+        }
+    }
+
+    /// <summary>A FATE end (kind 7) starts a reward record (kind 24): its level, where the player stood, job and party size.</summary>
+    private void NoteRewardEnd(Observation end, uint id, Dictionary<uint, IFate> table, Dictionary<uint, Models.Fate> tracked)
+    {
+        byte? level = tracked.TryGetValue(id, out var started) && started.LevelId > 0 ? (byte)Math.Min(started.LevelId, 255)
+            : table.TryGetValue(id, out var live) && live.Level > 0 ? live.Level : null;
+        var inside = false;
+        if (objectTable.LocalPlayer is { } player && end is { X: { } x, Z: { } z, Radius: { } radius })
+        {
+            var dx = player.Position.X - x;
+            var dz = player.Position.Z - z;
+            inside = dx * dx + dz * dz <= radius * radius;
+        }
+
+        var job = playerContext.CurrentJob();
+        rewardTracker.NoteEnd(end, level, inside, job?.Job, job?.Level, (byte)Math.Max(1, partyList.Length));
     }
 
     private static Models.Fate NewLegacy(IFate fate, Observation context) => new()

@@ -107,6 +107,15 @@ public sealed class PlayerContextSampler(IObjectTable objectTable, IPartyList pa
         log.Information(LastLine);
     }
 
+    /// <summary>The player's own current job (ClassJob row id) and job level now; null when not readable. Numbers only.</summary>
+    internal unsafe (byte Job, byte Level)? CurrentJob()
+    {
+        var state = PlayerState.Instance();
+        if (state == null || state->CurrentClassJobId == 0)
+            return null;
+        return (state->CurrentClassJobId, (byte)Math.Clamp((int)state->CurrentLevel, 0, byte.MaxValue));
+    }
+
     /// <summary>A fresh read of the player context now (light gain records), without recording it.</summary>
     internal PlayerContext? Snapshot(Observation context) => Read(context);
 
