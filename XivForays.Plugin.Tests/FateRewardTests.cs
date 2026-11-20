@@ -222,7 +222,7 @@ public class FateRewardTests
             tracker.NoteInventoryFull(Visit, T0 + 1000);
         });
         var r = Assert.Single(records);
-        Assert.Equal([[(int)Card, 1]], r.NotReceived);
+        Assert.Equal([[(int)Card, 1, NotReceivedReason.InventoryFull]], r.NotReceived);
         Assert.Equal((byte)1, r.InventoryFullNotices);
     }
 
@@ -236,7 +236,7 @@ public class FateRewardTests
             t.NoteWindow(Context(T0 + 400), Window(Louhi, 0), 35, 37, 80, 1);
             Pay(t, T0, 3);
         });
-        Assert.Equal([[(int)Crystals, 37]], Assert.Single(records).NotReceived);
+        Assert.Equal([[(int)Crystals, 37, NotReceivedReason.Unknown]], Assert.Single(records).NotReceived);
     }
 
     [Fact]
@@ -431,5 +431,105 @@ public class FateRewardTests
             Pay(t, T0);
         }));
         Assert.Contains("rank=1", FateRewardLog.Line(record));
+    }
+
+    // ---- reasons and currency (window left side) ----
+
+    private const uint Poetics = 28;
+
+    private static RewardWindowRead WithCurrency(uint fate, uint medal, uint poetics) =>
+        RewardWindowRead.FromFields(fate, true, 1, medal, 0, 2, 0,
+            [new RewardItem(Poetics, poetics, 64), default, default, default, default],
+            [new RewardItem(Lockbox, 9, 0), new RewardItem(Crystals, 40, 0), default]);
+
+    [Theory]
+    [InlineData("You cannot carry any more Allagan tomestones of poetics.", true)]
+    [InlineData("You cannot carry any more . Attempt abandoned.", false)]
+    [InlineData("You obtain 9 Pagos lockboxes.", false)]
+    public void CannotCarryChatLine(string line, bool expected) => Assert.Equal(expected, EnglishNotices.IsCannotCarry(line));
+
+    [Theory]
+    [InlineData("Unable to obtain. You already possess one of that unique item.", true)]
+    [InlineData("You cannot carry any more Allagan tomestones of poetics.", false)]
+    public void UniqueOwnedChatLine(string line, bool expected) => Assert.Equal(expected, EnglishNotices.IsUniqueOwned(line));
+
+    [Fact]
+    public void CurrencyRowsAreReceivedByDefault()
+    {
+        // The poetics row has no "You obtain" line; it is paid straight in.
+        var r = Assert.Single(Run(t =>
+        {
+            t.NoteEnd(End(Louhi, T0), 35, true, 37, 80, 1);
+            t.NoteWindow(Context(T0 + 400), WithCurrency(Louhi, 0, 111), 35, 37, 80, 1);
+            Pay(t, T0);
+        }));
+        Assert.Empty(r.NotReceived!);
+        Assert.Equal([[(int)Poetics, 111]], r.CurrencyPaid);
+    }
+
+    [Fact]
+    public void CurrencyAtItsCapIsNotReceivedWithReasonCapped()
+    {
+        var r = Assert.Single(Run(t =>
+        {
+            t.NoteEnd(End(Louhi, T0), 35, true, 37, 80, 1);
+            t.NoteWindow(Context(T0 + 400), WithCurrency(Louhi, 0, 111), 35, 37, 80, 1);
+            Pay(t, T0);
+            t.NoteCapped(Visit, Poetics, T0 + 1000); // "You cannot carry any more Allagan tomestones of poetics."
+        }));
+        Assert.Equal([[(int)Poetics, 111, NotReceivedReason.Capped]], r.NotReceived);
+        Assert.Empty(r.CurrencyPaid!);
+    }
+
+    [Fact]
+    public void ACrystalAtItsCapGetsReasonCapped()
+    {
+        var r = Assert.Single(Run(t =>
+        {
+            t.NoteEnd(End(Louhi, T0), 35, true, 37, 80, 1);
+            t.NoteWindow(Context(T0 + 400), Window(Louhi, 0), 35, 37, 80, 1);
+            Pay(t, T0, 3);
+            t.NoteCapped(Visit, Crystals, T0 + 1000);
+        }));
+        Assert.Equal([[(int)Crystals, 37, NotReceivedReason.Capped]], r.NotReceived);
+    }
+
+    [Fact]
+    public void AnOwnedUniqueItemGetsReasonUnique()
+    {
+        var r = Assert.Single(Run(t =>
+        {
+            t.NoteEnd(End(Louhi, T0), 35, true, 37, 80, 1);
+            t.NoteWindow(Context(T0 + 400), Window(Louhi, 0, more: new RewardItem(Card, 1, 0)), 35, 37, 80, 1);
+            Pay(t, T0);
+            t.NoteUnique(Visit, T0 + 1000);
+        }));
+        Assert.Equal([[(int)Card, 1, NotReceivedReason.Unique]], r.NotReceived);
+    }
+
+    [Fact]
+    public void ACappedNoticeOutsideThePeriodIsIgnored()
+    {
+        var r = Assert.Single(Run(t =>
+        {
+            t.NoteEnd(End(Louhi, T0), 35, true, 37, 80, 1);
+            t.NoteWindow(Context(T0 + 400), WithCurrency(Louhi, 0, 111), 35, 37, 80, 1);
+            Pay(t, T0);
+            t.NoteCapped(Visit, Poetics, T0 + 30_000);
+        }));
+        Assert.Empty(r.NotReceived!);
+    }
+
+    [Fact]
+    public void ReasonsAreInTheLocalLog()
+    {
+        var r = Assert.Single(Run(t =>
+        {
+            t.NoteEnd(End(Louhi, T0), 35, true, 37, 80, 1);
+            t.NoteWindow(Context(T0 + 400), WithCurrency(Louhi, 0, 111), 35, 37, 80, 1);
+            Pay(t, T0);
+            t.NoteCapped(Visit, Poetics, T0 + 1000);
+        }));
+        Assert.Contains("notReceived=[28x111r1]", FateRewardLog.Line(r));
     }
 }

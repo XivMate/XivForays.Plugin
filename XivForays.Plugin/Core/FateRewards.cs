@@ -6,7 +6,31 @@ using XivMate.DataGathering.Forays.Dalamud.Models;
 namespace XivMate.DataGathering.Forays.Dalamud.Core;
 
 /// <summary>One item row of the FATE reward window: game item id, amount and the window's own flag byte.</summary>
-internal readonly record struct RewardItem(uint ItemId, uint Amount, byte Flags);
+internal readonly record struct RewardItem(uint ItemId, uint Amount, byte Flags)
+{
+    /// <summary>
+    /// The window's left-hand currency entries (tomestones and the like) carry flag bit 64 in the item rows; both live
+    /// windows seen so far had item 28 (Allagan tomestone of poetics) with flags 64. The game pays them straight into
+    /// the currency with no "You obtain" line.
+    /// </summary>
+    public bool IsCurrency => (Flags & 64) != 0;
+}
+
+/// <summary>Why a listed reward was not received (kind 24 notReceived, third number).</summary>
+internal static class NotReceivedReason
+{
+    /// <summary>"You cannot carry any more [item]." for that item.</summary>
+    public const int Capped = 1;
+
+    /// <summary>An inventory-full notice came in the reward period.</summary>
+    public const int InventoryFull = 2;
+
+    /// <summary>An "already possess one of that unique item" notice came in the reward period.</summary>
+    public const int Unique = 3;
+
+    /// <summary>Nothing in the notices explains it (a missed notice, or an unknown cause).</summary>
+    public const int Unknown = 4;
+}
 
 /// <summary>
 /// The FATE reward window as the game holds it (the agent's reward entry), copied out as plain numbers. Never holds
@@ -103,6 +127,8 @@ internal sealed class FateRewardTracker
     private readonly Dictionary<(Guid Visit, uint FateId), Pending> pending = new();
     private readonly List<LootNotice> loot = new();
     private readonly List<(Guid Visit, long AtMs)> fullNotices = new();
+    private readonly List<(Guid Visit, uint ItemId, long AtMs)> cappedNotices = new();
+    private readonly List<(Guid Visit, long AtMs)> uniqueNotices = new();
 
     public int PendingCount => pending.Count;
 
@@ -160,6 +186,12 @@ internal sealed class FateRewardTracker
     /// <summary>An "inventory full" notice.</summary>
     public void NoteInventoryFull(Guid visit, long atMs) => fullNotices.Add((visit, atMs));
 
+    /// <summary>"You cannot carry any more [item]." (the item is at its cap).</summary>
+    public void NoteCapped(Guid visit, uint itemId, long atMs) => cappedNotices.Add((visit, itemId, atMs));
+
+    /// <summary>"Unable to obtain ... You already possess one of that unique item."</summary>
+    public void NoteUnique(Guid visit, long atMs) => uniqueNotices.Add((visit, atMs));
+
     /// <summary>Finishes every record whose reward period is over.</summary>
     public void Tick(long nowMs, Action<Observation> emit)
     {
@@ -170,6 +202,8 @@ internal sealed class FateRewardTracker
             Finish(key, overlaps[key], emit);
         loot.RemoveAll(l => nowMs - l.AtMs > KeepLootMs);
         fullNotices.RemoveAll(f => nowMs - f.AtMs > KeepLootMs);
+        cappedNotices.RemoveAll(f => nowMs - f.AtMs > KeepLootMs);
+        uniqueNotices.RemoveAll(f => nowMs - f.AtMs > KeepLootMs);
     }
 
     /// <summary>Left the zone or instance: every record of another visit is finished now, with what it has.</summary>
@@ -181,6 +215,8 @@ internal sealed class FateRewardTracker
             Finish(key, overlaps[key], emit);
         loot.RemoveAll(l => l.Visit != currentVisit);
         fullNotices.RemoveAll(f => f.Visit != currentVisit);
+        cappedNotices.RemoveAll(f => f.Visit != currentVisit);
+        uniqueNotices.RemoveAll(f => f.Visit != currentVisit);
     }
 
     public void Clear()
@@ -188,6 +224,8 @@ internal sealed class FateRewardTracker
         pending.Clear();
         loot.Clear();
         fullNotices.Clear();
+        cappedNotices.Clear();
+        uniqueNotices.Clear();
     }
 
     private Pending Get(Guid visit, uint fateId, Observation context, long anchorMs)
@@ -261,8 +299,12 @@ internal sealed class FateRewardTracker
             return;
         var fullCount = fullNotices.Count(f => f.Visit == key.Visit && f.AtMs >= p.AnchorMs - PreMs &&
                                               f.AtMs <= p.AnchorMs + PostMs);
+        var capped = cappedNotices.Where(c => c.Visit == key.Visit && c.AtMs >= p.AnchorMs - PreMs &&
+                                              c.AtMs <= p.AnchorMs + PostMs).Select(c => c.ItemId).ToHashSet();
+        var uniqueCount = uniqueNotices.Count(u => u.Visit == key.Visit && u.AtMs >= p.AnchorMs - PreMs &&
+                                                   u.AtMs <= p.AnchorMs + PostMs);
         pending.Remove(key);
-        if (Build(p, fullCount, overlap) is { } record)
+        if (Build(p, fullCount, overlap, capped, uniqueCount) is { } record)
             emit(record);
     }
 
@@ -271,7 +313,7 @@ internal sealed class FateRewardTracker
     /// the window with a success or a listed item, or a received item, or a successful end with the player inside the
     /// radius.
     /// </summary>
-    private static Observation? Build(Pending p, int fullCount, int overlap)
+    private static Observation? Build(Pending p, int fullCount, int overlap, IReadOnlySet<uint> capped, int uniqueCount)
     {
         var window = p.Window;
         var success = window?.Success ?? p.End?.Outcome == FateOutcome.Success;
@@ -285,14 +327,31 @@ internal sealed class FateRewardTracker
             return null;
 
         int[][]? notReceived = null;
+        int[][]? currencyPaid = null;
         if (window != null)
         {
-            var wanted = window.Items.Concat(window.ExtraItems.Select(e => new RewardItem(e.ItemId, e.Amount, 0)))
+            // Currency rows (the window's left side, flag 64) are paid straight into the currency: received unless
+            // the "cannot carry any more" notice names that currency. Item rows are received only by a notice.
+            var currency = window.Items.Where(i => i.IsCurrency).GroupBy(i => i.ItemId)
+                .ToDictionary(g => g.Key, g => g.Sum(i => (long)i.Amount));
+            var wanted = window.Items.Where(i => !i.IsCurrency)
+                .Concat(window.ExtraItems.Select(e => new RewardItem(e.ItemId, e.Amount, 0)))
                 .GroupBy(i => i.ItemId).ToDictionary(g => g.Key, g => g.Sum(i => (long)i.Amount));
             var got = p.Received.GroupBy(r => r.ItemId).ToDictionary(g => g.Key, g => g.Sum(r => (long)r.Quantity));
-            notReceived = wanted.Where(w => w.Value > got.GetValueOrDefault(w.Key))
-                .Select(w => new[] { (int)w.Key, (int)Math.Min(int.MaxValue, w.Value - got.GetValueOrDefault(w.Key)) })
-                .ToArray();
+            int Reason(uint item) => capped.Contains(item) ? NotReceivedReason.Capped
+                : fullCount > 0 ? NotReceivedReason.InventoryFull
+                : uniqueCount > 0 ? NotReceivedReason.Unique
+                : NotReceivedReason.Unknown;
+            var missing = wanted.Where(w => w.Value > got.GetValueOrDefault(w.Key))
+                .Select(w => new[]
+                {
+                    (int)w.Key, (int)Math.Min(int.MaxValue, w.Value - got.GetValueOrDefault(w.Key)), Reason(w.Key)
+                }).ToList();
+            missing.AddRange(currency.Where(c => capped.Contains(c.Key))
+                .Select(c => new[] { (int)c.Key, (int)Math.Min(int.MaxValue, c.Value), NotReceivedReason.Capped }));
+            notReceived = missing.ToArray();
+            currencyPaid = currency.Where(c => !capped.Contains(c.Key))
+                .Select(c => new[] { (int)c.Key, (int)Math.Min(int.MaxValue, c.Value) }).ToArray();
         }
 
         var end = p.End;
@@ -327,6 +386,7 @@ internal sealed class FateRewardTracker
             RewardExtraItems = window?.ExtraItems.Select(i => new[] { (int)i.ItemId, (int)i.Amount }).ToArray(),
             ReceivedItems = received,
             NotReceived = notReceived,
+            CurrencyPaid = currencyPaid,
             InventoryFullNotices = (byte)Math.Min(fullCount, byte.MaxValue),
             OverlapCount = (byte)Math.Min(overlap, byte.MaxValue)
         };
@@ -376,5 +436,6 @@ internal sealed class FateRewardLog(string? filePath)
         $"record fate={r.GameId} level={r.FateLevel?.ToString() ?? "?"} elemental={r.PlayerElementalLevel?.ToString() ?? "?"}/{r.PlayerEffectiveElementalLevel?.ToString() ?? "?"} " +
         $"job={r.PlayerClassJobId?.ToString() ?? "?"} group={r.GroupSize?.ToString() ?? "?"} outcome={r.Outcome} rank={r.RewardRank?.ToString() ?? "?"} window={r.RewardWindowSeen} end={r.RewardEndSeen} " +
         $"inside={r.InsideFateRadius} received=[{string.Join(" ", (r.ReceivedItems ?? []).Select(i => $"{i[0]}x{i[1]}"))}] " +
-        $"notReceived=[{string.Join(" ", (r.NotReceived ?? []).Select(i => $"{i[0]}x{i[1]}"))}] full={r.InventoryFullNotices} overlap={r.OverlapCount}";
+        $"currencyPaid=[{string.Join(" ", (r.CurrencyPaid ?? []).Select(i => $"{i[0]}x{i[1]}"))}] " +
+        $"notReceived=[{string.Join(" ", (r.NotReceived ?? []).Select(i => $"{i[0]}x{i[1]}r{(i.Length > 2 ? i[2] : 0)}"))}] full={r.InventoryFullNotices} overlap={r.OverlapCount}";
 }

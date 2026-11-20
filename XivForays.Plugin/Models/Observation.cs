@@ -372,8 +372,15 @@ internal sealed record Observation
     /// <summary>Kind 24: every item the "You obtain" notices gave in the reward period: [[itemId, total quantity, notices]].</summary>
     public int[][]? ReceivedItems { get; init; }
 
-    /// <summary>Kind 24: window items (or amounts) with no matching notice: [[itemId, missing quantity]]. Inventory full, an owned unique item or a missed notice.</summary>
+    /// <summary>
+    /// Kind 24: window items (or amounts) not received: [[itemId, missing quantity, reason]]. Reason 1 capped ("You cannot
+    /// carry any more [item]." for that item), 2 inventory full, 3 unique already owned, 4 unknown (no notice explains it).
+    /// Currency rows (window left side) appear here only with reason 1.
+    /// </summary>
     public int[][]? NotReceived { get; init; }
+
+    /// <summary>Kind 24: the window's currency rows (left side, flag 64, e.g. tomestones) paid straight into the currency, taken as received unless capped: [[itemId, amount]].</summary>
+    public int[][]? CurrencyPaid { get; init; }
 
     /// <summary>Kind 24: how many "inventory full" notices came in the reward period.</summary>
     public byte? InventoryFullNotices { get; init; }

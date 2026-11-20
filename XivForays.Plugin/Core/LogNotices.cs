@@ -90,6 +90,25 @@ internal static partial class EnglishNotices
 
     public static bool IsSelfDefeat(string text) => text.StartsWith("You defeat ", StringComparison.Ordinal);
 
+    /// <summary>
+    /// "You cannot carry any more [item]." Real sample: "You cannot carry any more Allagan tomestones of poetics."
+    /// (ACT chat code 083C, system error). The sheet rows with this text are 1958, 2173, 2175, 3539, 4512, 4575, 4577,
+    /// 5236 and 5254; which one the FATE window uses is not sourced, so only the English text is matched.
+    /// </summary>
+    public static bool IsCannotCarry(string text) =>
+        text.StartsWith("You cannot carry any more ", StringComparison.Ordinal) &&
+        !text.Contains("Attempt abandoned", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Unique item already owned. English text from the game sheet (rows 461, 1235, 1241, 1268, 1269); no live sample
+    /// of it from a FATE reward was found.
+    /// </summary>
+    public static bool IsUniqueOwned(string text) =>
+        text.StartsWith("Unable to obtain", StringComparison.Ordinal) &&
+        (text.Contains("already possess one of that unique item", StringComparison.Ordinal) ||
+         text.Contains("You already possess one.", StringComparison.Ordinal) ||
+         text.Contains("You already have received one.", StringComparison.Ordinal));
+
     public static bool IsLoot(string text) => text.StartsWith("You obtain ", StringComparison.Ordinal);
 
     public static uint? LootQuantity(string text)

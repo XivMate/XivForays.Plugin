@@ -27,7 +27,10 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
 - **Your FATE rewards (unreleased, kind 24):** each time a FATE finishes and you were in it, the FATE's game id and
   level, your participation rank (gold, silver or bronze) and the rewards the game's own reward window lists (item ids,
   amounts, experience), every item you actually received after it (item id and amount, read from the same game
-  notices as your other drops), which listed items did not arrive (for example a full inventory), whether you stood
+  notices as your other drops), which listed items did not arrive with a reason code (at its cap, inventory full, unique already owned or unknown, taken from
+  the game's "cannot carry any more", inventory full and unique notices; only the item id and a number are kept), the
+  window's left-hand currency rows (such as tomestones, paid straight in with no notice, counted as received unless the
+  cap notice names that currency), whether you stood
   inside the FATE circle when it ended, your own job and level, your elemental level, your party size, the zone and the
   time. It exists so rare FATE drop rates can be measured from many players, each of whom rolls separately.
   Numbers only: no FATE name, no chat text, no player names. The plugin reads the reward window's data from game

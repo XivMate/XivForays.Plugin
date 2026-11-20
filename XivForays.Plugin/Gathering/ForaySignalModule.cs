@@ -364,6 +364,25 @@ internal sealed partial class ForaySignalModule(
                 return;
             }
 
+            if (EnglishNotices.IsCannotCarry(text))
+            {
+                var capItem = SeString.Parse(message.Data.Span).Payloads.OfType<ItemPayload>().FirstOrDefault();
+                if (capItem != null && capItem.ItemId != 0)
+                {
+                    var capContext = observations.GetContext();
+                    rewardTracker.NoteCapped(capContext.VisitId, capItem.ItemId, capContext.ObservedAtMs);
+                }
+
+                return;
+            }
+
+            if (EnglishNotices.IsUniqueOwned(text))
+            {
+                var uniqueContext = observations.GetContext();
+                rewardTracker.NoteUnique(uniqueContext.VisitId, uniqueContext.ObservedAtMs);
+                return;
+            }
+
             if (chat.TargetKind is (XivChatRelationKind.EngagedEnemy or XivChatRelationKind.UnengagedEnemy) &&
                 EnglishNotices.IsSelfDefeat(text) && pairing.FallbackRecords((int)ObservationKind.SelfDefeat, now))
                 RecordDefeat((byte)ObjectCategory.Self, null);
