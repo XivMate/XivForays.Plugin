@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- FATE rewards: for each FATE you complete, the plugin records the FATE's id and level, your participation rank (gold, silver or bronze), the rewards the game lists, every item you actually received (so rare drops can be counted per player), whether any listed item did not arrive (for example a full inventory), your job and level, your elemental level and your party size. Numbers only: no names, no chat text. A numbers-only copy is also kept in `fate-rewards.log` in the plugin's own folder.
+
 ## 0.0.0.18
 
 - Eurekan kettle light (Pagos and Pyros): the plugin now records each light you collect, how much it added to the kettle, and what caused it (a monster kill or a FATE). Numbers only, no chat text.

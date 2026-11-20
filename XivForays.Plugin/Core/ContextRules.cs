@@ -15,9 +15,9 @@ internal static class ContextRules
     /// (70 y tilt trust, closer re-takes, language-independent notices, legacy snapshots off); 3 = release 0.0.0.14
     /// (group rows carry each member's foray level, effective level and sync flag); 4 = release 0.0.0.15 (drop
     /// linking: defeat notices name the enemy, party defeats, loot and chain carry the defeat link, kind 3 the chain,
-    /// FATE reward guard, heartbeat lootListening); 5 = release 0.0.0.18 (kettle light kind 20, portals kind 21, light gain kind 22, notice net kind 23, calculated weather). Bump on any capture change.
+    /// FATE reward guard, heartbeat lootListening); 5 = release 0.0.0.18 (kettle light kind 20, portals kind 21, light gain kind 22, notice net kind 23, calculated weather); 6 = FATE rewards (kind 24). Bump on any capture change.
     /// </summary>
-    public const int CaptureRevision = 5;
+    public const int CaptureRevision = 6;
 
     /// <summary>A change is recorded at most this often.</summary>
     public const long MinChangeMs = 5000;

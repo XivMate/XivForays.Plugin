@@ -55,6 +55,9 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IPartyList PartyList { get; private set; } = null!;
 
+    [PluginService]
+    internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
+
     private const string CommandName = "/xivforays";
 
     public Configuration.Configuration Configuration { get; init; }
@@ -149,7 +152,23 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton(PartyList);
         services.AddSingleton(Log);
         services.AddSingleton(GameGui);
+        services.AddSingleton(AddonLifecycle);
         services.AddSingleton<Core.FateRewardWindow>();
+        services.AddSingleton<Core.FateRewardTracker>();
+        services.AddSingleton(_ =>
+        {
+            string? path = null;
+            try
+            {
+                path = System.IO.Path.Combine(PluginInterface.GetPluginConfigDirectory(), "fate-rewards.log");
+            }
+            catch (Exception)
+            {
+                // Local file is optional.
+            }
+
+            return new Core.FateRewardLog(path);
+        });
         services.AddSingleton<FateModule>();
         services.AddSingleton<SchedulerService>();
         services.AddSingleton<TerritoryService>();

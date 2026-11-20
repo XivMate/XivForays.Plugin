@@ -33,6 +33,7 @@ Sharing is off on a fresh install. Nothing is read or sent outside these zones, 
 | FATEs | FATE ID, game-defined FATE name (legacy route), centre, radius, start time, progress, state |
 | Critical engagements (Bozja, Zadnor, Occult Crescent) | encounter ID, state, progress, start time, seconds left, marker position and radius |
 | Eurekan kettle light (Pagos, Pyros) | the game's message number for each light notice (grade, full, forge), the kettle value before and after when readable, the kill or FATE it followed (monster id, level, mutated/adapted, your chain, own or party kill as a category), your party size. Numbers only; the message text is not read |
+| FATE rewards (unreleased) | FATE ID and level, your rank (gold, silver, bronze), the rewards the reward window lists and the items you received (item ids and amounts), which listed items did not arrive, whether you stood in the FATE circle, your job and level, your elemental level, your party size. Numbers only; no FATE name or chat text |
 | Coffers, bunnies, pots, carrots | game object ID, kind, grade when known, position |
 | Your own loot, EXP chain and defeat notices, and your party's defeat notices (any client language) | item ID and quantity, chain number, which monster was defeated (game ids) and whether by you or by a party member (category only, never which member), which kill a drop or chain followed, and whether a FATE had just finished. Numbers only; the notice text is discarded |
 

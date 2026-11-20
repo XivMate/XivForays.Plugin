@@ -146,6 +146,7 @@ public class PayloadPrivacyTests
         Assert.Equal(21, (int)ObservationKind.Portal);
         Assert.Equal(22, (int)ObservationKind.LightGain);
         Assert.Equal(23, (int)ObservationKind.Notice);
-        Assert.Equal(Enumerable.Range(1, 23), Enum.GetValues<ObservationKind>().Select(k => (int)k));
+        Assert.Equal(24, (int)ObservationKind.FateReward);
+        Assert.Equal(Enumerable.Range(1, 24), Enum.GetValues<ObservationKind>().Select(k => (int)k));
     }
 }

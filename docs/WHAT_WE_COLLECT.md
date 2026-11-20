@@ -24,6 +24,15 @@ Under **Record in** you can untick Eureka, Bozja (incl. Zadnor, Delubrum) or Occ
   completion just before it most likely caused it (monster id, level, whether it was mutated or adapted, your chain at
   the kill, kill by you or a party member as a category), and how many people are in your party. If several kills could
   have caused it, the record says so instead of guessing. Numbers only.
+- **Your FATE rewards (unreleased, kind 24):** each time a FATE finishes and you were in it, the FATE's game id and
+  level, your participation rank (gold, silver or bronze) and the rewards the game's own reward window lists (item ids,
+  amounts, experience), every item you actually received after it (item id and amount, read from the same game
+  notices as your other drops), which listed items did not arrive (for example a full inventory), whether you stood
+  inside the FATE circle when it ended, your own job and level, your elemental level, your party size, the zone and the
+  time. It exists so rare FATE drop rates can be measured from many players, each of whom rolls separately.
+  Numbers only: no FATE name, no chat text, no player names. The plugin reads the reward window's data from game
+  memory (read only); it does not click, close or change the window. A numbers-only copy is kept in
+  `fate-rewards.log` in the plugin's own folder on your PC.
 - **Whether drop recording is on:** the 30 second position record says whether the plugin is listening for drops, so
   "nothing dropped" can be told apart from "not recording".
 - **Your own foray state:** your position every 30 seconds, job and level, elemental/knowledge level, the magia board,

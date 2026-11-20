@@ -5,6 +5,8 @@ using System.Linq;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using Dalamud.Game;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
@@ -36,6 +38,9 @@ internal sealed partial class ForaySignalModule(
     SchedulerService scheduler,
     ICommandManager commands,
     LightGainLog lightLog,
+    FateRewardTracker rewardTracker,
+    FateRewardLog rewardLog,
+    IAddonLifecycle addonLifecycle,
     IPluginLog log) : IModule
 {
     /// <summary>How often an unresolved defeat notice looks for its enemy again.</summary>
@@ -71,6 +76,8 @@ internal sealed partial class ForaySignalModule(
         {
             chatGui.ChatMessage += OnGameNotice;
             chatGui.LogMessage += OnLogMessage;
+            addonLifecycle.RegisterListener(AddonEvent.PostSetup, FateRewardAddon, OnRewardAddon);
+            addonLifecycle.RegisterListener(AddonEvent.PostRefresh, FateRewardAddon, OnRewardAddon);
             lootListening = true;
             scheduler.ScheduleOnFrameworkThread(SignalTick, StreamRates.SignalScanMs);
             scheduler.ScheduleOnFrameworkThread(ResolveTick, DefeatResolveMs);
@@ -79,7 +86,11 @@ internal sealed partial class ForaySignalModule(
         {
             chatGui.ChatMessage -= OnGameNotice;
             chatGui.LogMessage -= OnLogMessage;
+            addonLifecycle.UnregisterListener(AddonEvent.PostSetup, FateRewardAddon, OnRewardAddon);
+            addonLifecycle.UnregisterListener(AddonEvent.PostRefresh, FateRewardAddon, OnRewardAddon);
             lootListening = false;
+            rewardTracker.Clear();
+            lastRewardSignature = null;
             pairing.Clear();
             linker.Clear();
             light.Clear();
@@ -112,6 +123,13 @@ internal sealed partial class ForaySignalModule(
             int? Int(int index) => message.TryGetIntParameter(index, out var value) ? value : null;
             var row = message.LogMessageId;
             var now = Environment.TickCount64;
+            if (InventoryFullRows.IsFull(row))
+            {
+                var fullContext = observations.GetContext();
+                rewardTracker.NoteInventoryFull(fullContext.VisitId, fullContext.ObservedAtMs);
+                return;
+            }
+
             if (LightGainRows.Type(row) is { } gainType)
             {
                 RecordGainNotice(row, gainType, NoticeParameters(message));
@@ -235,6 +253,9 @@ internal sealed partial class ForaySignalModule(
             return;
         if (observation.Kind == ObservationKind.SelfDefeat && KettleRows.InKettleZone(observation.TerritoryId))
             light.NoteKill(observation.VisitId, observation.TerritoryId, LightKill.From(observation));
+        // A loot notice that follows no kill can be a FATE reward item (kind 24 matches it by time).
+        if (FateRewardTracker.IsRewardLoot(observation))
+            rewardTracker.NoteLoot(observation);
         observations.Record(observation);
     }
 
@@ -359,8 +380,67 @@ internal sealed partial class ForaySignalModule(
         RecordLoot(items[0].ItemId, EnglishNotices.LootQuantity(text), null, objects.LocalPlayer!.Position);
     }
 
+    private const string FateRewardAddon = "FateReward";
+    private string? lastRewardSignature;
+
+    private void OnRewardAddon(AddonEvent type, AddonArgs args)
+    {
+        if (Enabled && framework.IsInFrameworkUpdateThread)
+            ReadRewardWindow();
+    }
+
+    /// <summary>Kind 24: reads the reward entry of the reward window (the front of the game's reward queue) when one is there.</summary>
+    private void ReadRewardWindow()
+    {
+        try
+        {
+            if (objects.LocalPlayer == null || !forayService.IsInRecordableTerritory())
+                return;
+            var read = FateRewardReader.ReadFront();
+            if (read == null)
+                return;
+            var context = observations.GetContext();
+            if (!forayService.IsContentEnabled(context.TerritoryId))
+                return;
+            if (read.Signature != lastRewardSignature)
+            {
+                lastRewardSignature = read.Signature;
+                rewardLog.Add(FateRewardLog.Line(read));
+            }
+
+            byte? level = null;
+            foreach (var fate in fateTable)
+                if (fate.FateId == read.FateId && fate.Level > 0)
+                    level = fate.Level;
+            var job = playerContext.CurrentJob();
+            rewardTracker.NoteWindow(context, read, level, job?.Job, job?.Level, (byte)Math.Max(1, partyList.Length));
+        }
+        catch (Exception ex)
+        {
+            log.Warning($"FATE reward reading failed ({ex.GetType().Name}).");
+        }
+    }
+
+    private void EmitReward(Observation record)
+    {
+        rewardLog.Add(FateRewardLog.Line(record));
+        Emit(record);
+    }
+
     private void SignalTick()
     {
+        if (Enabled)
+        {
+            try
+            {
+                rewardTracker.Tick(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), EmitReward);
+            }
+            catch (Exception ex)
+            {
+                log.Warning($"FATE reward finishing failed ({ex.GetType().Name}).");
+            }
+        }
+
         if (!Enabled || !forayService.IsInRecordableTerritory())
             return;
 
@@ -373,6 +453,7 @@ internal sealed partial class ForaySignalModule(
             var context = observations.GetContext();
             if (visitId != context.VisitId)
             {
+                rewardTracker.FlushOtherVisits(context.VisitId, EmitReward);
                 linker.Flush(Emit);
                 EmitLight(light.Flush(), context);
                 GainTick(context, true);
@@ -392,6 +473,7 @@ internal sealed partial class ForaySignalModule(
                 observations.Record(Heartbeat.Create(context, player.Position, gameVersion.Value, lootListening));
             }
 
+            ReadRewardWindow();
             SampleTreasure(context);
             SamplePortals(context);
             if (ForayZones.HasCriticalEngagements(context.TerritoryId))
