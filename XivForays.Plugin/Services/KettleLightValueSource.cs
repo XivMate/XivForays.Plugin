@@ -82,9 +82,13 @@ internal sealed class KettleLightValueSource(IPluginLog log, Func<string?> gameV
         private static bool Read(ulong address, byte[] buffer) =>
             ReadProcessMemory(Self, (UIntPtr)address, buffer, (UIntPtr)buffer.Length, out var n) && n == (UIntPtr)buffer.Length;
 
+        // Reused: reads run on the framework thread only.
+        private readonly byte[] eight = new byte[8];
+        private readonly byte[] four = new byte[4];
+
         public bool TryReadPointer(ulong address, out ulong value)
         {
-            var b = new byte[8];
+            var b = eight;
             var ok = Read(address, b);
             value = ok ? BitConverter.ToUInt64(b) : 0;
             return ok;
@@ -92,7 +96,7 @@ internal sealed class KettleLightValueSource(IPluginLog log, Func<string?> gameV
 
         public bool TryReadInt32(ulong address, out int value)
         {
-            var b = new byte[4];
+            var b = four;
             var ok = Read(address, b);
             value = ok ? BitConverter.ToInt32(b) : 0;
             return ok;

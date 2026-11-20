@@ -96,7 +96,8 @@ public class PortalTrackerTests
 
         // Out of the table for less than the grace period: nothing yet.
         Assert.Empty(Run(tracker, At(42)));
-        var gone = Assert.Single(Run(tracker, At(46)));
+        Assert.Empty(Run(tracker, At(47)));
+        var gone = Assert.Single(Run(tracker, At(48)));
         Assert.Equal(ObservationKind.Portal, gone.Kind);
         Assert.Equal((byte)0, gone.State);
         Assert.Equal(appeared.ObjectTrackId, gone.ObjectTrackId);

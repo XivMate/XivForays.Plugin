@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased (performance pass)
+
+- Lighter on the game: the Baldesion Arsenal portal scan runs every 5 seconds instead of every second, the FATE scan every second instead of every half second, and your foray state is read every 2 seconds instead of every second. Treasure and monster scans reuse what they looked up and allocate less. Nothing new is recorded and nothing recorded is dropped; a portal that appears is noted up to 5 seconds later than before.
+
 ## 0.0.0.18
 
 - Eurekan kettle light (Pagos and Pyros): the plugin now records each light you collect, how much it added to the kettle, and what caused it (a monster kill or a FATE). Numbers only, no chat text.
