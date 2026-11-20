@@ -25,6 +25,12 @@ public sealed class EnemyTrackingService(
     private Dictionary<ulong, (float X, float Y, float Z)> lastRecorded = new();
     // Tracks already named by a defeat notice, so two notices never name the same death.
     private readonly HashSet<Guid> defeatLinked = new();
+    // Scan buffers swapped each scan, so a scan does not allocate two dictionaries and a set.
+    private Dictionary<ulong, TrackedEnemy> spareTracked = new();
+    private Dictionary<ulong, (float X, float Y, float Z)> spareRecorded = new();
+    private readonly HashSet<Guid> liveTracks = new();
+    // Resolved monster name by name id (the sheet text and the display name never change for a name id).
+    private readonly Dictionary<uint, string> names = new();
     private Guid visitId;
 
     /// <summary>
@@ -44,9 +50,9 @@ public sealed class EnemyTrackingService(
         // Debug view only: the same territory/map the upload context (ObservationService.GetContext) uses.
         var territory = (uint)clientState.TerritoryType;
         var map = clientState.MapId;
-        foreach (var enemy in objectTable.OfType<IBattleNpc>())
+        foreach (var candidate in objectTable)
         {
-            if (IsEnemy(enemy) && enemy.CurrentHp > 0)
+            if (candidate is IBattleNpc enemy && IsEnemy(enemy) && enemy.CurrentHp > 0)
                 positions[enemy.GameObjectId] = Read(enemy, forayService.VisitId, territory, map,
                     DateTimeOffset.UtcNow.ToUnixTimeSeconds(), null).Position;
         }
@@ -91,12 +97,14 @@ public sealed class EnemyTrackingService(
             };
         }
 
-        var next = new Dictionary<ulong, TrackedEnemy>();
-        var nextRecorded = new Dictionary<ulong, (float X, float Y, float Z)>();
+        var next = spareTracked;
+        next.Clear();
+        var nextRecorded = spareRecorded;
+        nextRecorded.Clear();
         var snapshot = new List<EnemyPosition>();
-        foreach (var enemy in objectTable.OfType<IBattleNpc>())
+        foreach (var candidate in objectTable)
         {
-            if (!IsEnemy(enemy))
+            if (candidate is not IBattleNpc enemy || !IsEnemy(enemy))
                 continue;
 
             var id = enemy.GameObjectId;
@@ -201,8 +209,16 @@ public sealed class EnemyTrackingService(
         poseCapture.EndScan(context, record);
         if (Overlay != null)
             OverlaySafe(() => overlay!.EndScan());
-        var liveTracks = next.Values.Select(enemy => enemy.Id).ToHashSet();
-        defeatLinked.RemoveWhere(trackId => !liveTracks.Contains(trackId));
+        if (defeatLinked.Count > 0)
+        {
+            liveTracks.Clear();
+            foreach (var enemy in next.Values)
+                liveTracks.Add(enemy.Id);
+            defeatLinked.RemoveWhere(trackId => !liveTracks.Contains(trackId));
+        }
+
+        spareTracked = tracked;
+        spareRecorded = lastRecorded;
         tracked = next;
         lastRecorded = nextRecorded;
         return snapshot;
@@ -220,9 +236,9 @@ public sealed class EnemyTrackingService(
         var player = objectTable.LocalPlayer;
         var candidates = new List<DefeatCandidate>();
         var found = new List<(IBattleNpc Enemy, TrackedEnemy Track)>();
-        foreach (var enemy in objectTable.OfType<IBattleNpc>())
+        foreach (var candidate in objectTable)
         {
-            if (!IsEnemy(enemy) || enemy.CurrentHp != 0 || !tracked.TryGetValue(enemy.GameObjectId, out var track) ||
+            if (candidate is not IBattleNpc enemy || !IsEnemy(enemy) || enemy.CurrentHp != 0 || !tracked.TryGetValue(enemy.GameObjectId, out var track) ||
                 track.Position.MobIngameId != enemy.BaseId || defeatLinked.Contains(track.Id))
                 continue;
             var distance = player == null ? 0 : Vector3.Distance(player.Position, enemy.Position);
@@ -293,16 +309,29 @@ public sealed class EnemyTrackingService(
             modelScale = null;
         var element = native->ForayInfo.Element;
         var inCombat = !dead && (enemy.TargetObject != null || enemy.CurrentHp < enemy.MaxHp);
-        var adapted = dead ? previous?.Position.IsAdapted == true :
-            enemy.StatusList.Any(status => adaptationIds.Value.Contains(status.StatusId));
-        var mutated = dead ? previous?.Position.IsMutated == true :
-            enemy.StatusList.Any(status => mutationIds.Value.Contains(status.StatusId));
-        var name = dataManager.GetExcelSheet<BNpcName>().TryGetRow(enemy.NameId, out var row)
-            ? row.Singular.ExtractText()
-            : string.Empty;
-        var displayName = enemy.Name.TextValue;
-        if (name.Equals(displayName, StringComparison.OrdinalIgnoreCase))
-            name = displayName;
+        var adapted = dead && previous?.Position.IsAdapted == true;
+        var mutated = dead && previous?.Position.IsMutated == true;
+        if (!dead)
+        {
+            var adaptation = adaptationIds.Value;
+            var mutation = mutationIds.Value;
+            foreach (var status in enemy.StatusList)
+            {
+                adapted |= adaptation.Contains(status.StatusId);
+                mutated |= mutation.Contains(status.StatusId);
+            }
+        }
+
+        if (!names.TryGetValue(enemy.NameId, out var name))
+        {
+            name = dataManager.GetExcelSheet<BNpcName>().TryGetRow(enemy.NameId, out var row)
+                ? row.Singular.ExtractText()
+                : string.Empty;
+            var displayName = enemy.Name.TextValue;
+            if (name.Equals(displayName, StringComparison.OrdinalIgnoreCase))
+                name = displayName;
+            names[enemy.NameId] = name;
+        }
         byte? level = forayLevel > 0 ? forayLevel : dead ? previous?.ForayLevel : null;
         var position = new EnemyPosition
         {

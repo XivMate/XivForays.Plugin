@@ -17,7 +17,7 @@ internal sealed class PortalTracker
     public const uint BlueBaseId = 2009726;
     public const uint RedBaseId = 2009727;
     public const uint FieldMapId = 515;
-    public const long GoneGraceMs = 5_000;
+    public const long GoneGraceMs = 7_500;
 
     /// <summary>An object that comes back at the same spot this close (yalms) is the same appearance.</summary>
     private const float SameSpot = 1f;
@@ -33,7 +33,11 @@ internal sealed class PortalTracker
     }
 
     private readonly Dictionary<ulong, Entry> entries = new();
+    private readonly HashSet<ulong> seen = new();
     private Guid visit;
+
+    /// <summary>True when nothing is tracked, so a scan outside the field map has nothing to end.</summary>
+    public bool IsIdle => entries.Count == 0;
 
     public static bool IsPortal(uint baseId) => baseId is BlueBaseId or RedBaseId;
 
@@ -59,7 +63,7 @@ internal sealed class PortalTracker
 
         var now = context.ObservedAtMs;
         var inScope = InScope(context.TerritoryId, context.MapId);
-        var seen = new HashSet<ulong>();
+        seen.Clear();
         if (inScope)
         {
             foreach (var snap in table)

@@ -62,6 +62,11 @@ internal sealed partial class ForaySignalModule(
     private readonly PortalTracker portals = new();
     private Guid visitId;
     private long lastHeartbeat;
+    private long lastPortalScan;
+    private long lastContextRead;
+    private readonly TreasureClassCache treasureClasses = new();
+    private Dictionary<ulong, (uint BaseId, Vector3 Position)> treasureSpare = new();
+    private readonly List<PortalSnapshot> portalTable = new();
     private bool lootListening;
 
     public bool Enabled { get; private set; }
@@ -487,6 +492,8 @@ internal sealed partial class ForaySignalModule(
                 treasures.Clear();
                 encounters.Clear();
                 lastHeartbeat = 0;
+                lastPortalScan = 0;
+                lastContextRead = 0;
             }
 
             // Coverage heartbeat: own position + context, grouped by VisitId (no name, no content ID).
@@ -500,13 +507,15 @@ internal sealed partial class ForaySignalModule(
             if (rewardTracker.WantsWindowRead(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
                 ReadRewardWindow();
             SampleTreasure(context);
-            SamplePortals(context);
+            if (Throttle.Due(now, ref lastPortalScan, StreamRates.PortalScanMs))
+                SamplePortals(context);
             if (ForayZones.HasCriticalEngagements(context.TerritoryId))
                 SampleEncounters(context);
             LightTick(context, player.Position);
             GainTick(context, false);
             // Kind 19 player context: on change (at most every 5 s) or every 60 s.
-            playerContext.Tick(context, observations.Record);
+            if (Throttle.Due(now, ref lastContextRead, StreamRates.PlayerContextReadMs))
+                playerContext.Tick(context, observations.Record);
         }
         catch (Exception ex)
         {
@@ -517,18 +526,27 @@ internal sealed partial class ForaySignalModule(
     /// <summary>Kind 21: Baldesion Arsenal portals (event objects 2009726 / 2009727) on the Hydatos field map.</summary>
     private void SamplePortals(Observation context)
     {
-        var table = new List<PortalSnapshot>();
+        var table = portalTable;
+        table.Clear();
         if (PortalTracker.InScope(context.TerritoryId, context.MapId))
+        {
             foreach (var obj in objects)
                 if (obj.ObjectKind == ObjectKind.EventObj && PortalTracker.IsPortal(obj.BaseId))
                     table.Add(new PortalSnapshot(obj.GameObjectId, obj.BaseId, obj.Position.X, obj.Position.Y,
                         obj.Position.Z));
+        }
+        else if (portals.IsIdle)
+        {
+            return;
+        }
+
         portals.Sample(context, table, Emit);
     }
 
     private void SampleTreasure(Observation context)
     {
-        var current = new Dictionary<ulong, (uint BaseId, Vector3 Position)>();
+        var current = treasureSpare;
+        current.Clear();
         foreach (var obj in objects)
         {
             if (obj.BaseId == 0)
@@ -561,10 +579,20 @@ internal sealed partial class ForaySignalModule(
             });
         }
 
+        treasureSpare = treasures;
         treasures = current;
     }
 
     private (byte Kind, byte? Grade) ClassifyTreasure(IGameObject obj)
+    {
+        // Only treasure-like kinds can classify; the rest never reach the cache or a sheet.
+        if (obj.ObjectKind is not (ObjectKind.Treasure or ObjectKind.EventObj) && obj is not IBattleNpc)
+            return (0, null);
+        var key = obj is IBattleNpc npc ? npc.NameId : obj.BaseId;
+        return treasureClasses.Get((int)obj.ObjectKind, key, () => ClassifyTreasureUncached(obj));
+    }
+
+    private (byte Kind, byte? Grade) ClassifyTreasureUncached(IGameObject obj)
     {
         if (obj.ObjectKind == ObjectKind.Treasure)
         {

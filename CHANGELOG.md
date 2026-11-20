@@ -3,6 +3,7 @@
 ## 0.0.0.19
 
 - FATE rewards: for each FATE you complete, the plugin records the FATE's id and level, your participation rank (gold, silver or bronze), the rewards the game lists, every item you actually received (so rare drops can be counted per player), whether any listed item did not arrive (for example a full inventory), your job and level, your elemental level and your party size. Numbers only: no names, no chat text. Items you received that the reward window does not list are kept and marked as such, and each record notes whether the FATE was in Eureka, Bozja or the Occult Crescent. The reward window is only checked when the game opens it, or for a few seconds after a FATE you stood in has ended, never constantly. A numbers-only copy is also kept in `fate-rewards.log` in the plugin's own folder.
+- Lighter on the game: the Baldesion Arsenal portal scan runs every 5 seconds instead of every second, the FATE scan every second instead of every half second, and your foray state is read every 2 seconds instead of every second. Treasure and monster scans reuse what they looked up and allocate less. Nothing new is recorded and nothing recorded is dropped; a portal that appears is noted up to 5 seconds later than before.
 
 ## 0.0.0.18
 
